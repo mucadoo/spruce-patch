@@ -5,7 +5,7 @@ from menus.games.utils import raproxy_cli
 from menus.games.utils.cheevos_cache_manager import CheevosCacheManager
 from menus.language.language import Language
 from menus.settings import settings_menu
-from menus.settings.cheevos_cache_browser import CheevosCacheBrowser, CheevosWatchMenu
+from menus.settings.cheevos_cache_browser import CheevosCacheBrowser, CheevosWatchMenu, show_background_cache
 from menus.settings.cheevos_cache_menu import CheevosCacheMenu
 from menus.settings.pending_awards_menu import PendingAwardsMenu
 from views.grid_or_list_entry import GridOrListEntry
@@ -35,6 +35,11 @@ class CfwSystemSettingsMenuForCategory(settings_menu.SettingsMenu):
         if ControllerInput.A != input_value:
             return
         CheevosCacheBrowser().show_menu()
+
+    def background_cache(self, input_value):
+        if ControllerInput.A != input_value:
+            return
+        show_background_cache()
 
     def watch_new_games(self, input_value):
         if ControllerInput.A != input_value:
@@ -91,6 +96,11 @@ class CfwSystemSettingsMenuForCategory(settings_menu.SettingsMenu):
                 description=Language.label(
                     "cacheForOfflineDesc",
                     "Pick a platform or a game. Already cached games are skipped")))
+            option_list.append(self.cheevos_entry(
+                Language.label("cheevosBackgroundTitle", "Background cache"), self.background_cache,
+                description=Language.label(
+                    "cheevosBackgroundDesc",
+                    "See games still caching, or stop them")))
             option_list.append(self.cheevos_entry(
                 Language.label("keepLibraryOffline", "Keep library offline"), self.watch_new_games,
                 description=Language.label(
