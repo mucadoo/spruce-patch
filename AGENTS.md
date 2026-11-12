@@ -18,6 +18,8 @@ This repo holds optional patches for spruceOS 4.6.0 on the Miyoo Flip, plus an i
 
 Add a folder under `payload/` and an entry in `features.json`. Do not put files directly in `payload/` outside a feature folder.
 
+If two pieces write the same `.cfg`, keep each piece's own keys in its own file. The installer merges `key = value` lines when both pieces are selected, so one piece must not repeat the other piece's keys.
+
 ## Never commit
 
 - `spruce-config.json`, RetroAchievements credentials, or any tokens and passwords.
