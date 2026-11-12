@@ -852,10 +852,19 @@ def main() -> None:
             try:
                 drop_unsupported_cached_games(storage)
                 waiting_rom = cache_queue.oldest(storage)
+                waiting = cache_queue.count(storage)
+                # The library watch hashes on its own, then the service caches what it queued.
+                # Either one is a cache already in progress.
+                active = (
+                    waiting > 0
+                    or cache_queue.draining_elsewhere()
+                    or cache_queue.bulk_run_active()
+                )
                 payload = {
-                    "waiting": cache_queue.count(storage),
+                    "waiting": waiting,
                     "cached": storage.count_cache_by_prefix(cache_keys.PREFIX_PATCH),
                     "label": waiting_rom.label if waiting_rom is not None else "",
+                    "active": active,
                 }
             finally:
                 storage.close()
