@@ -72,6 +72,7 @@ from .rom_browser import (
     cached_rom_paths_by_game,
     cached_unlock_titles,
     clear_cached_games,
+    drop_unsupported_cached_games,
     describe_browser_entries,
     describe_browser_entries_fast,
     list_cached_games,
@@ -849,6 +850,7 @@ def main() -> None:
         if args.command == "cache-queue-status":
             storage = Storage()
             try:
+                drop_unsupported_cached_games(storage)
                 waiting_rom = cache_queue.oldest(storage)
                 payload = {
                     "waiting": cache_queue.count(storage),

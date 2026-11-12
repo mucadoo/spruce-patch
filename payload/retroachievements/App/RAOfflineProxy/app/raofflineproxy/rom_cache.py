@@ -28,6 +28,20 @@ class CacheGameAuthError(CacheGameError):
     pass
 
 
+class CacheGameUnsupported(CacheGameError):
+    """RetroAchievements recognized the ROM, but this version has no achievement set."""
+
+
+# RA uses ids in this range for "Unsupported Game Version (...)" placeholders.
+UNSUPPORTED_GAME_ID_MIN = 1_000_000_000
+
+
+def is_unsupported_game_version(game_id: int | None, title: str | None = None) -> bool:
+    if isinstance(game_id, int) and game_id >= UNSUPPORTED_GAME_ID_MIN:
+        return True
+    return (title or "").lower().startswith("unsupported game version")
+
+
 def api_error_message(action: str, payload: dict) -> str:
     message = payload.get("Error") or payload.get("Message") or payload.get("error")
     if message:
@@ -164,6 +178,10 @@ def refresh_game_patch(
 
     if not payload.get("Success"):
         raise CacheGameError(api_error_message("patch", payload))
+
+    patch_data = payload.get("PatchData") or {}
+    if is_unsupported_game_version(game_id, patch_data.get("Title") if isinstance(patch_data, dict) else None):
+        raise CacheGameUnsupported("Unsupported game version")
 
     payload = filter_warning_achievement_from_patch_payload(payload)
     response_body = json.dumps(payload, separators=(",", ":"))

@@ -246,6 +246,7 @@ def run_cache_paths(
         if on_rom_result is not None:
             on_rom_result(path, status, message)
 
+    rom_browser.drop_unsupported_cached_games(storage)
     known_game_ids = rom_browser.cached_game_ids(storage)
     cached_paths = load_cached_rom_paths(storage)
     queued_paths = cache_queue.queued_rom_paths(storage, normalize_cached_rom_path)
