@@ -73,6 +73,7 @@ from .rom_browser import (
     cached_unlock_titles,
     clear_cached_games,
     drop_unsupported_cached_games,
+    resume_interrupted_cache,
     describe_browser_entries,
     describe_browser_entries_fast,
     list_cached_games,
@@ -865,6 +866,7 @@ def main() -> None:
             storage = Storage()
             try:
                 drop_unsupported_cached_games(storage)
+                resume_interrupted_cache(storage)
                 waiting_rom = cache_queue.oldest(storage)
                 waiting = cache_queue.count(storage)
                 # The library watch hashes on its own, then the service caches what it queued.

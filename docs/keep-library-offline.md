@@ -40,6 +40,8 @@ A file the watch could not read is skipped on later passes. Turn that watch off 
 
 Games you add are not instant. They wait for the next pass, then for a free spot in the 100-game window.
 
+Turning the Flip off does not throw away a background cache. Games already placed in the queue are still there after reboot, and **Background cache** shows them. A game is stored in one step: the patch, the unlocks and the achievement sets land together. If the power cuts while one game is downloading, that game stays in the queue and is not shown as cached. The service continues the queue once the Flip is on, online, and idle.
+
 ## While a watch or a cache is running
 
 Starting another cache asks you to open **Background cache** or to add the new games to the one already running. That includes a watch pass that is still hashing, and games the watch has already queued.

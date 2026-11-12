@@ -155,6 +155,7 @@ def refresh_game_patch(
     config_data: dict,
     cache_images: bool = True,
     source_rom_path: str | None = None,
+    persist: bool = True,
 ) -> str | None:
     url = build_api_url(
         upstream_host(config_data),
@@ -185,6 +186,8 @@ def refresh_game_patch(
 
     payload = filter_warning_achievement_from_patch_payload(payload)
     response_body = json.dumps(payload, separators=(",", ":"))
+    if not persist:
+        return response_body
 
     storage.upsert_cache(
         cache_keys.patch(game_id, credentials["user"]),
@@ -496,6 +499,47 @@ def pending_award_user(award: dict) -> str | None:
     )
 
 
+def session_body_from_unlocks(
+    storage: Storage, game_id: int, user: str, unlocks_body: str
+) -> str:
+    """Build the session record from the unlocks just downloaded, before they are stored."""
+    try:
+        payload = json.loads(unlocks_body)
+        unlock_ids = payload.get("UserUnlocks") or []
+        cached_unlock_ids = filter_warning_achievement_ids([
+            achievement_id
+            for achievement_id in unlock_ids
+            if isinstance(achievement_id, int) and achievement_id > 0
+        ])
+    except Exception:
+        cached_unlock_ids = []
+    server_now = int(time.time())
+    pending_awards = storage.get_pending_awards()
+    unlocks = [
+        {"ID": achievement_id, "When": server_now}
+        for achievement_id in merge_start_session_unlock_ids(
+            cached_unlock_ids=cached_unlock_ids,
+            pending_awards=pending_awards,
+            achievement_game_ids=find_achievement_game_ids(
+                storage,
+                pending_unlock_achievement_ids(pending_awards, user),
+                likely_game_id=game_id,
+            ),
+            game_id=game_id,
+            user=user,
+        )
+    ]
+    return json.dumps(
+        {
+            "Success": True,
+            "ServerNow": server_now,
+            "HardcoreUnlocks": [],
+            "Unlocks": unlocks,
+        },
+        separators=(",", ":"),
+    )
+
+
 def cache_session(game_id: int, credentials: dict, storage: Storage) -> str:
     server_now = int(time.time())
     payload = {
@@ -523,34 +567,52 @@ def cache_game(
     cache_images: bool = True,
     source_rom_path: str | None = None,
 ) -> None:
-    """source_rom_path is stored with the game data in the same write: setting it afterwards
-    meant reading and rewriting the whole stored game just to change one field."""
+    """Download the whole game, then store it in one commit.
+
+    source_rom_path is stored with the patch. Nothing is written until the patch, unlocks and
+    achievement sets have all arrived, so a power cut leaves the game on the queue instead of
+    half cached.
+    """
+    user_agent = user_agent or FALLBACK_USER_AGENT
     patch_body = refresh_game_patch(
         game_id,
         credentials,
-        user_agent or FALLBACK_USER_AGENT,
+        user_agent,
         storage,
         config_data,
-        cache_images=cache_images,
+        cache_images=False,
         source_rom_path=source_rom_path,
+        persist=False,
     )
     if patch_body is None:
         raise CacheGameError("patch failed")
-
-    cache_unlocks(
-        game_id,
-        credentials,
-        user_agent or FALLBACK_USER_AGENT,
-        config_data,
-        storage,
+    unlocks_body = cache_unlocks(
+        game_id, credentials, user_agent, config_data, storage=None
     )
-    cache_achievementsets(
+    if unlocks_body is None:
+        raise CacheGameError("unlocks failed")
+    sets_body = cache_achievementsets(
         hash_value,
         credentials,
-        user_agent or FALLBACK_USER_AGENT,
+        user_agent,
         config_data,
-        storage,
+        storage=None,
         game_id=game_id,
-        cache_images=cache_images,
+        cache_images=False,
     )
-    cache_session(game_id, credentials, storage)
+    if sets_body is None:
+        raise CacheGameError("achievement sets failed")
+    user = credentials["user"]
+    session_body = session_body_from_unlocks(storage, game_id, user, unlocks_body)
+    storage.upsert_cache_group([
+        (cache_keys.patch(game_id, user), patch_body, source_rom_path),
+        (cache_keys.unlocks(game_id, user), unlocks_body, None),
+        (cache_keys.achievementsets(hash_value, user), sets_body, None),
+        (cache_keys.start_session(game_id, user), session_body, None),
+    ])
+    if cache_images:
+        proxy_base_url = f"http://{proxy_host(config_data)}:{proxy_port(config_data)}"
+        for action, body in (("patch", patch_body), ("achievementsets", sets_body)):
+            _, downloads = rewrite_image_urls(action, body, proxy_base_url)
+            for orig_url, img_path in downloads:
+                schedule_image_download(orig_url, img_path, user_agent, game_id)
