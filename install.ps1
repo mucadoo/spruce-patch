@@ -94,15 +94,21 @@ foreach ($feature in $selected) {
 }
 if (-not $found) { throw 'Nothing to install for that choice. Re-download the patch.' }
 
-# Two pieces can own the same RetroArch cfg. Combine their settings instead of letting one erase the other.
+# RetroArch cfgs are merged, never replaced: keep what is already on the card, and let the
+# patch's own keys win. This also covers a card that already has another piece installed.
 $files = @()
 foreach ($group in ($found | Group-Object Rel)) {
     $items = @($group.Group)
-    if ($items.Count -gt 1 -and $items[0].Name -like '*.cfg') {
+    $isCfg = $items[0].Name -like '*.cfg'
+    $cardTarget = Join-Path $card $items[0].Rel
+    if ($isCfg) {
+        $sources = @()
+        if (Test-Path -LiteralPath $cardTarget) { $sources += $cardTarget }
+        $sources += @($items.Source)
         $files += [pscustomobject]@{
-            Source = Merge-RetroarchCfg @($items.Source)
-            Rel    = $items[0].Rel
-            Name   = $items[0].Name
+            Source  = Merge-RetroarchCfg $sources
+            Rel     = $items[0].Rel
+            Name    = $items[0].Name
             Feature = ($items.Feature -join ' + ')
         }
     } else {
