@@ -8,8 +8,13 @@ from pathlib import Path
 
 from . import cache_budget, cache_keys
 from .config import CONFIG_FILE, save_config
-from .rom_browser import list_scannable_files_recursive, normalize_cached_rom_path
-from .smart_cache import known_rom_paths, run_cache_paths
+from .rom_browser import (
+    list_scannable_files_recursive,
+    load_cached_rom_paths,
+    load_no_match_rom_paths,
+    normalize_cached_rom_path,
+)
+from .smart_cache import ROM_RESULT_NO_MATCH, ROM_RESULT_OK, known_rom_paths, run_cache_paths
 from .storage import Storage, current_millis
 
 WATCHED_FOLDERS_KEY = "watched_folders"
@@ -162,17 +167,31 @@ def scan_folder(
     listed = {str(path) for path in files}
     seen = seen_paths(storage, folder)
     known = known_rom_paths(storage)
+    settled = load_cached_rom_paths(storage) | set(load_no_match_rom_paths(storage))
     unseen = [path for path in files if str(path) not in seen]
-    mark_seen(storage, (str(path) for path in unseen if normalize_cached_rom_path(path) in known))
-    new = [path for path in unseen if normalize_cached_rom_path(path) not in known]
+    mark_seen(
+        storage,
+        (str(path) for path in unseen if normalize_cached_rom_path(path) in settled),
+    )
+    new = [
+        path
+        for path in unseen
+        if normalize_cached_rom_path(path) not in known
+        and normalize_cached_rom_path(path) not in settled
+    ]
 
     handled: list[str] = []
+
+    def remember_settled(path, status, _message) -> None:
+        if status in {ROM_RESULT_OK, ROM_RESULT_NO_MATCH}:
+            handled.append(str(path))
+
     result = run_cache_paths(
         storage,
         config_data,
         new,
         should_abort=should_abort,
-        on_rom_result=lambda path, _status, _message: handled.append(str(path)),
+        on_rom_result=remember_settled,
         cache_now=False,
     )
     mark_seen(storage, handled)

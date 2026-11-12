@@ -46,17 +46,23 @@ def list_folder(path):
         if len(parts) < 4:
             continue
         if len(parts) >= 5:
-            no_achievements = parts[2] == "1"
+            status = parts[2]
             path = parts[3]
             name = parts[4]
         else:
-            no_achievements = False
+            status = "0"
             path = parts[2]
             name = parts[3]
+        if status == "1":
+            status = "no_achievements"
+        elif status == "0":
+            status = ""
         entries.append({
             "is_dir": parts[0] == "1",
             "cached": parts[1] == "1",
-            "no_achievements": no_achievements,
+            "no_achievements": status == "no_achievements",
+            "unsupported_version": status == "unsupported_version",
+            "unreadable": status == "unreadable",
             "path": path,
             "name": name,
         })

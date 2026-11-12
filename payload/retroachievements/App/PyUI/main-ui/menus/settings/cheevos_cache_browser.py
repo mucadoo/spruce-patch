@@ -275,8 +275,12 @@ class CheevosCacheBrowser:
                     badge = "Selected"
                 elif entry.get("cached"):
                     badge = Language.label("cachedCheevosBadge", "Cached")
+                elif entry.get("unsupported_version"):
+                    badge = Language.label("unsupportedVersionCheevos", "Unsupported version")
                 elif entry.get("no_achievements"):
                     badge = Language.label("noAchievementsCheevos", "No achievements")
+                elif entry.get("unreadable"):
+                    badge = Language.label("unreadableCheevos", "Could not read")
                 else:
                     badge = None
                 options.append(self._row(

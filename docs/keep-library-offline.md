@@ -31,7 +31,7 @@ The service looks for work about once a minute. A watched folder is due every 30
 A pass lists ROM files from A to Z. It skips `Imgs`, hidden folders, and anything deeper than 12 folders. For each file it has not handled before:
 
 - Already cached, or already waiting in the queue: leave it.
-- Already checked, and RetroAchievements has no set for that ROM: leave it.
+- Already checked, and RetroAchievements has no set for that ROM: leave it. A game RetroAchievements does not know is **No achievements**. A known game whose dump has no set is **Unsupported version**. A file that cannot be read, such as an empty ROM, is **Could not read**. None of those stay in the "still to cache" count.
 - Anything else: hash it and add it to the queue. The watch does not download the achievement data itself.
 
 Hashing does not need Wi-Fi. Downloading does. The service caches the queue while the Flip is online, idle, and signed in to RetroAchievements. One 30-minute window caches up to 100 games. The first 20 go out together, then the rest are spaced about 18 seconds apart, so RetroAchievements is not hit in one burst. A game with no matching set does not use that budget. An unsupported ROM version is treated as no match and is not listed under Cached Games.
