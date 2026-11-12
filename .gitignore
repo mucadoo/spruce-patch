@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+spruce-config.json
+config.json
+proxy.sqlite3
+image_cache/
+*.opt
+*.rmp
+.DS_Store
+Thumbs.db
