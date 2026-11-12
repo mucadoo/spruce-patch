@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import cache_queue
+from . import cache_keys, cache_queue
 from .auth import resolve_credentials
 from .config import (
     CONFIG_FILE,
@@ -852,7 +852,7 @@ def main() -> None:
                 waiting_rom = cache_queue.oldest(storage)
                 payload = {
                     "waiting": cache_queue.count(storage),
-                    "cached": len(list_cached_games(storage)),
+                    "cached": storage.count_cache_by_prefix(cache_keys.PREFIX_PATCH),
                     "label": waiting_rom.label if waiting_rom is not None else "",
                 }
             finally:
