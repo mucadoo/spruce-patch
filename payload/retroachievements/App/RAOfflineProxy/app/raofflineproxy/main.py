@@ -97,6 +97,8 @@ from .storage import Storage
 from .watch_folders import (
     last_scans,
     normalize_folder,
+    note_scan_now,
+    skip_existing_files,
     unwatch_folder,
     watch_folder,
     watched_folders,
@@ -359,6 +361,18 @@ def main() -> None:
         dest="foreground",
         action="store_true",
         help="Cache on screen and drop whatever this run does not finish",
+    )
+    parser.add_argument(
+        "--skip-existing",
+        dest="skip_existing",
+        action="store_true",
+        help="Watch the folder but remember the ROMs already in it, so only later files are queued",
+    )
+    parser.add_argument(
+        "--defer-scan",
+        dest="defer_scan",
+        action="store_true",
+        help="Watch the folder and wait out this scan interval; a cache started with it handles the ROMs already there",
     )
     parser.add_argument(
         "--paths-file",
@@ -888,8 +902,17 @@ def main() -> None:
             if not folder.is_dir():
                 raise ValueError(f"Invalid browser directory: {folder}")
 
-            added = watch_folder(config_data, folder)
             path = normalize_folder(folder)
+            if args.skip_existing or args.defer_scan:
+                storage = Storage()
+                try:
+                    if args.skip_existing:
+                        skip_existing_files(storage, path)
+                    else:
+                        note_scan_now(storage, path)
+                finally:
+                    storage.close()
+            added = watch_folder(config_data, folder)
             if args.as_json:
                 print(json.dumps({"path": path, "watched": True, "added": added}, separators=(",", ":")))
             else:

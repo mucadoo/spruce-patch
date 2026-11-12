@@ -131,6 +131,24 @@ def forget_seen(storage: Storage, paths: Iterable[str]) -> None:
         storage.delete_cache(cache_keys.watch_seen(path))
 
 
+def note_scan_now(storage: Storage, folder: str) -> None:
+    """Treat the folder as just scanned, so the service waits out the normal interval."""
+    record_scan(storage, normalize_folder(folder), current_millis())
+
+
+def skip_existing_files(storage: Storage, folder: str) -> int:
+    """Remember every ROM already in the folder and do not queue them.
+
+    Later passes only pick up files that were not here. Turning the watch off forgets these
+    markers.
+    """
+    folder = normalize_folder(folder)
+    files = list_scannable_files_recursive(Path(folder))
+    mark_seen(storage, (str(path) for path in files))
+    record_scan(storage, folder, current_millis())
+    return len(files)
+
+
 def scan_folder(
     storage: Storage,
     config_data: dict,

@@ -16,6 +16,19 @@ from views.view_creator import ViewCreator
 from views.view_type import ViewType
 
 
+def start_cache_in_background(args, cleanup=None):
+    """Start the cache and show its progress. Leaving the screen does not stop the job."""
+    def work():
+        try:
+            raproxy_cli.run(*args, timeout=None)
+        finally:
+            if cleanup is not None:
+                cleanup()
+
+    threading.Thread(target=work, daemon=True).start()
+    show_background_cache()
+
+
 def show_background_cache():
     """Live count of games the service is still caching. A stops that queue.
 
@@ -412,16 +425,7 @@ class CheevosCacheBrowser:
         self._start_in_background(["cache-folder-listing", "--path", path, "--background"])
 
     def _start_in_background(self, args, cleanup=None):
-        """Start the cache and show its progress. Leaving the screen does not stop the job."""
-        def work():
-            try:
-                raproxy_cli.run(*args, timeout=None)
-            finally:
-                if cleanup is not None:
-                    cleanup()
-
-        threading.Thread(target=work, daemon=True).start()
-        show_background_cache()
+        start_cache_in_background(args, cleanup)
 
     def _queue_paths(self, paths):
         handle = tempfile.NamedTemporaryFile("w", delete=False, prefix="ra-cache-", suffix=".txt")
@@ -492,7 +496,8 @@ class CheevosWatchMenu:
         options = [self._row(
             Language.label("cheevosWholeLibrary", "Whole library"),
             Language.label(
-                "cheevosWatchWholeLibrary", "New games on every platform are cached later"),
+                "cheevosWatchWholeLibrary",
+                "Games you add later are cached. You can also cache the games already here."),
             self._toggle_library,
             self._flag(raproxy_cli.is_watched(self.root)),
         )]
@@ -502,7 +507,8 @@ class CheevosWatchMenu:
             options.append(self._row(
                 platform["name"],
                 Language.label(
-                    "cheevosWatchPlatform", "New games on this platform are cached later"),
+                    "cheevosWatchPlatform",
+                    "Games you add later are cached. You can also cache the games already here."),
                 lambda path=platform["path"]: self._toggle_platform(path),
                 self._flag(watched),
                 platform["icon"],
@@ -527,15 +533,15 @@ class CheevosWatchMenu:
         if raproxy_cli.is_watched(self.root):
             raproxy_cli.unwatch_folder(self.root)
             return
+        title = Language.label("cheevosWholeLibrary", "Whole library")
+        mode = self._choose_existing(self.root, title)
+        if mode is None:
+            return
         Display.display_message(Language.label("savingCheevosWatch", "Saving..."))
         for platform in self.platforms:
             if raproxy_cli.is_watched(platform["path"]):
                 raproxy_cli.unwatch_folder(platform["path"])
-        if not raproxy_cli.watch_folder(
-                self.root, Language.label("cheevosWholeLibrary", "Whole library"), confirm=False):
-            Display.display_message(
-                Language.label("cheevosWatchFailed", "Could not watch the library"),
-                duration_ms=2000)
+        self._apply_watch(self.root, title, mode)
 
     def _toggle_platform(self, path):
         if raproxy_cli.is_watched(self.root):
@@ -544,7 +550,8 @@ class CheevosWatchMenu:
             for platform in self.platforms:
                 if os.path.abspath(platform["path"]) == os.path.abspath(path):
                     continue
-                if not raproxy_cli.watch_folder(platform["path"], platform["name"], confirm=False):
+                if not raproxy_cli.watch_folder(
+                        platform["path"], platform["name"], confirm=False, skip_existing=True):
                     Display.display_message(
                         Language.label("cheevosWatchFailed", "Could not watch the library"),
                         duration_ms=2000)
@@ -555,7 +562,47 @@ class CheevosWatchMenu:
             return
         name = next(
             (platform["name"] for platform in self.platforms if platform["path"] == path), path)
-        if not raproxy_cli.watch_folder(path, name, confirm=False):
+        mode = self._choose_existing(path, name)
+        if mode is None:
+            return
+        self._apply_watch(path, name, mode)
+
+    def _choose_existing(self, path, title):
+        """Ask whether the games already in this watch should be cached. None means the user backed out."""
+        Display.display_message(Language.label("checkingCheevosFolder", "Checking games..."))
+        estimate = raproxy_cli.run_json("estimate-cache", "--path", path, "--json", timeout=600)
+        if estimate and int(estimate.get("remaining") or 0) <= 0:
+            return "new"
+        remaining = int((estimate or {}).get("remaining") or 0)
+        if remaining > 0:
+            cache_label = Language.label(
+                "cheevosWatchCacheExisting", "Cache the {count} games already here",
+            ).replace("{count}", str(remaining))
+        else:
+            cache_label = Language.label(
+                "cheevosWatchCacheExistingUnknown", "Cache the games already here")
+        choice = ListOfOptionsSelectionMenu().get_selected_option_index([
+            cache_label,
+            Language.label("cheevosWatchOnlyNew", "Only cache games I add later"),
+        ], title)
+        if choice is None:
+            return None
+        return "cache" if choice == 0 else "new"
+
+    def _apply_watch(self, path, title, mode):
+        Display.display_message(Language.label("savingCheevosWatch", "Saving..."))
+        if not raproxy_cli.watch_folder(
+                path, title, confirm=False,
+                skip_existing=(mode != "cache"),
+                defer_scan=(mode == "cache")):
             Display.display_message(
                 Language.label("cheevosWatchFailed", "Could not watch the library"),
                 duration_ms=2000)
+            return
+        if mode == "cache":
+            start_cache_in_background(["cache-folder-listing", "--path", path, "--background"])
+            return
+        Display.display_message(
+            Language.label(
+                "cheevosWatchingNew", "Watching. Games you add later will be cached."),
+            duration_ms=2000)
