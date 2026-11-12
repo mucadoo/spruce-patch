@@ -1,4 +1,4 @@
-# Installs the spruce RetroAchievements / offline cache patch onto a Miyoo SD card.
+# Installs the chosen spruce patch pieces onto a Miyoo SD card.
 # Run via install.bat (double-click) or: powershell -ExecutionPolicy Bypass -File install.ps1
 
 $ErrorActionPreference = 'Stop'
@@ -7,7 +7,45 @@ $payload = Join-Path $here 'payload'
 
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 
-# 1. Find the spruce SD card (removable drive labelled SPRUCE).
+$catalogPath = Join-Path $here 'features.json'
+if (-not (Test-Path -LiteralPath $catalogPath)) { throw 'features.json is missing. Re-download the patch.' }
+$catalog = @(Get-Content -LiteralPath $catalogPath -Raw | ConvertFrom-Json)
+if ($catalog.Count -eq 0) { throw 'features.json has no install options.' }
+
+Write-Host ''
+Write-Host 'Choose what to install. Type the numbers separated by spaces, or A for all.'
+Write-Host ''
+for ($i = 0; $i -lt $catalog.Count; $i++) {
+    Write-Host ("  {0}  {1}" -f ($i + 1), $catalog[$i].name)
+    Write-Host ("     {0}" -f $catalog[$i].description)
+}
+Write-Host '  A  All of the above'
+Write-Host '  Q  Cancel'
+Write-Host ''
+$choice = Read-Host 'Choice'
+
+$selected = @()
+if ($choice -match '^(a|all)$') {
+    $selected = @($catalog)
+} elseif ($choice -match '^(q|quit|n|no)$' -or [string]::IsNullOrWhiteSpace($choice)) {
+    Write-Host 'Cancelled. Nothing was changed.'
+    exit 0
+} else {
+    $seen = @{}
+    foreach ($token in ($choice -split '[,\s]+')) {
+        if ($token -notmatch '^\d+$') { throw "Unknown choice '$token'. Use numbers from the list, or A." }
+        $index = [int]$token - 1
+        if ($index -lt 0 -or $index -ge $catalog.Count) { throw "There is no option $token." }
+        $id = [string]$catalog[$index].id
+        if (-not $seen.ContainsKey($id)) {
+            $seen[$id] = $true
+            $selected += $catalog[$index]
+        }
+    }
+}
+if ($selected.Count -eq 0) { Write-Host 'Cancelled. Nothing was changed.'; exit 0 }
+
+# Find the spruce SD card (removable drive labelled SPRUCE).
 Write-Step 'Looking for the SPRUCE SD card...'
 $cards = @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=2' |
     Where-Object { $_.VolumeName -eq 'SPRUCE' })
@@ -21,32 +59,37 @@ if ($cards.Count -gt 1) {
 $card = $cards[0].DeviceID + '\'
 Write-Host "Found SPRUCE card at $card"
 
-# 2. Make sure it really is a spruce install.
-foreach ($required in @('App\PyUI', 'App\RAOfflineProxy', 'spruce')) {
+foreach ($required in @('App\PyUI', 'spruce', 'RetroArch')) {
     if (-not (Test-Path -LiteralPath (Join-Path $card $required))) {
         throw "The card at $card does not look like spruce (missing $required)."
     }
 }
 
-# 3. Build the list of files to copy. Never touch user data or secrets.
 $skip = @('spruce-config.json', 'config.json', 'proxy.sqlite3')
-$files = Get-ChildItem -LiteralPath $payload -Recurse -File | ForEach-Object {
-    $rel = $_.FullName.Substring($payload.Length).TrimStart('\')
-    [pscustomobject]@{ Source = $_.FullName; Rel = $rel; Name = $_.Name }
-} | Where-Object {
-    $_.Name -notin $skip -and $_.Rel -notmatch '(^|\\)image_cache(\\|$)'
+$files = @()
+foreach ($feature in $selected) {
+    $featureDir = Join-Path $payload ([string]$feature.id)
+    if (-not (Test-Path -LiteralPath $featureDir)) { throw "Missing payload folder for $($feature.name)." }
+    $files += @(Get-ChildItem -LiteralPath $featureDir -Recurse -File | ForEach-Object {
+        $rel = $_.FullName.Substring($featureDir.Length).TrimStart('\')
+        [pscustomobject]@{ Source = $_.FullName; Rel = $rel; Name = $_.Name; Feature = [string]$feature.name }
+    } | Where-Object {
+        $_.Name -notin $skip -and $_.Rel -notmatch '(^|\\)(image_cache|__pycache__)(\\|$)' -and $_.Name -notlike '*.pyc'
+    })
 }
-if (-not $files) { throw 'The payload folder is empty. Re-download the patch.' }
+if (-not $files) { throw 'Nothing to install for that choice. Re-download the patch.' }
 
 Write-Host ''
-Write-Host "Files to install ($($files.Count)):"
+Write-Host "Installing:"
+$selected | ForEach-Object { Write-Host "  - $($_.name)" }
+Write-Host ''
+Write-Host "Files ($($files.Count)):"
 $files | ForEach-Object { Write-Host "  $($_.Rel)" }
 Write-Host ''
 
 $answer = Read-Host 'Install these files onto the SPRUCE card? (y/N)'
 if ($answer -notin @('y', 'Y', 'yes', 'YES')) { Write-Host 'Cancelled. Nothing was changed.'; exit 0 }
 
-# 4. Back up the originals first.
 $stamp     = Get-Date -Format 'yyyyMMdd-HHmmss'
 $backupDir = Join-Path $env:USERPROFILE "spruce-patch-backup-$stamp"
 Write-Step "Backing up current files to $backupDir"
@@ -59,8 +102,7 @@ foreach ($f in $files) {
     }
 }
 
-# 5. Copy the patched files onto the card.
-Write-Step 'Copying patched files...'
+Write-Step 'Copying files...'
 foreach ($f in $files) {
     $target = Join-Path $card $f.Rel
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null

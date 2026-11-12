@@ -1,0 +1,12 @@
+[
+  {
+    "id": "retroachievements",
+    "name": "RetroAchievements offline cache",
+    "description": "Cache games for offline play, watch new games, and show each game's own icon."
+  },
+  {
+    "id": "bezels",
+    "name": "Handheld bezels",
+    "description": "Frames for Game Boy, Game Boy Color, and GBA. NES, SNES, and Genesis stay full screen, matching Knulli on this 4:3 screen."
+  }
+]

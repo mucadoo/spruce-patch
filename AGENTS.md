@@ -1,6 +1,6 @@
 # Agent instructions
 
-This repo holds a patch for spruceOS 4.6.0 (RetroAchievements offline cache menu, watch settings, and related fixes) plus an installer that copies it onto a Miyoo SD card.
+This repo holds optional patches for spruceOS 4.6.0 on the Miyoo Flip, plus an installer that copies the chosen pieces onto an SD card.
 
 ## Commits
 
@@ -9,13 +9,19 @@ This repo holds a patch for spruceOS 4.6.0 (RetroAchievements offline cache menu
 
 ## Repo contents
 
-- `payload/` holds only changed files, laid out with the same relative paths as the SD card root (for example `App/PyUI/...`).
-- `install.ps1` and `install.bat` install the payload onto the card with a backup. Keep them working for a normal Windows user who double-clicks `install.bat`.
-- `README.md` explains installation for end users.
+- `features.json` lists the install choices, in menu order. Each `id` is a folder under `payload/`.
+- `payload/<id>/` holds only that piece's files, laid out with the same relative paths as the SD card root (for example `App/PyUI/...`).
+- `install.ps1` and `install.bat` let the user pick one or more pieces, then back up and copy those files. Keep them working for a normal Windows user who double-clicks `install.bat`.
+- `README.md` explains each piece and how to install it.
+
+## Adding a piece
+
+Add a folder under `payload/` and an entry in `features.json`. Do not put files directly in `payload/` outside a feature folder.
 
 ## Never commit
 
 - `spruce-config.json`, RetroAchievements credentials, or any tokens and passwords.
 - `App/RAOfflineProxy/data/` (config, sqlite database, logs, image cache, locks, keys).
 - Device-written RetroArch runtime files (`.opt`, `.rmp`, and similar) unless they are an intentional change.
-- Theme folders or other user content.
+- Theme folders, overlay PNG packs, or other user content. Bezel pieces should be the small config files that point at art already on the card.
+- `__pycache__/` and `.pyc` files.
