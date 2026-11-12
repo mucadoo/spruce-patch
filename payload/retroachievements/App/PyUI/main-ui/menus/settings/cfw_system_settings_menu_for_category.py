@@ -49,6 +49,28 @@ class CfwSystemSettingsMenuForCategory(settings_menu.SettingsMenu):
         if message:
             Display.display_message(message, duration_ms=2500)
 
+    def clear_offline_cache(self, input_value):
+        if ControllerInput.A != input_value:
+            return
+        from utils.user_prompt import UserPrompt
+
+        if not UserPrompt.prompt_yes_no(
+                Language.label("clearOfflineCache", "Clear offline cache"),
+                [Language.label(
+                    "clearOfflineCacheConfirm",
+                    "Delete every cached game, icon, and queued download. Pending awards and your login stay.")]):
+            return
+        Display.display_message(Language.label("clearingOfflineCache", "Clearing offline cache..."))
+        if raproxy_cli.run("clear-cached-games", timeout=180) is None:
+            Display.display_message(
+                Language.label("clearOfflineCacheFailed", "Could not clear the cache"),
+                duration_ms=2500)
+            return
+        CheevosCacheManager.refresh()
+        Display.display_message(
+            Language.label("clearedOfflineCache", "Offline cache cleared"),
+            duration_ms=2500)
+
     def cheevos_entry(self, text, value, value_text=None, description=None):
         return GridOrListEntry(
             primary_text=text,
@@ -80,5 +102,10 @@ class CfwSystemSettingsMenuForCategory(settings_menu.SettingsMenu):
                 Language.label("pendingCheevosAwards", "Pending Awards"), self.launch_pending_awards))
             option_list.append(self.cheevos_entry(
                 Language.label("cacheRecentCheevos", "Cache recently played games"), self.cache_recently_played))
+            option_list.append(self.cheevos_entry(
+                Language.label("clearOfflineCache", "Clear offline cache"), self.clear_offline_cache,
+                description=Language.label(
+                    "clearOfflineCacheDesc",
+                    "Delete all cached games and icons. Pending awards and your login stay")))
 
         return option_list
