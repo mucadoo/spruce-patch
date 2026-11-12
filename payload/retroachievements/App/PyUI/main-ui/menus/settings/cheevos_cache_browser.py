@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 
 from controller.controller import Controller
 from controller.controller_inputs import ControllerInput
@@ -17,9 +18,27 @@ from views.view_type import ViewType
 
 
 def show_background_cache():
-    """Live count of games the service is still caching. A stops that queue."""
-    while True:
-        status = raproxy_cli.run_json("cache-queue-status", "--json") or {}
+    """Live count of games the service is still caching. A stops that queue.
+
+    The status command runs on its own thread, so the screen keeps reading buttons while it
+    works. Asking for the status inside the input loop dropped B presses.
+    """
+    state = {"status": None, "stop": False}
+
+    def poll():
+        while not state["stop"]:
+            status = raproxy_cli.run_json("cache-queue-status", "--json", timeout=15)
+            if status is not None:
+                state["status"] = status
+            for _ in range(20):
+                if state["stop"]:
+                    return
+                time.sleep(0.1)
+
+    def lines_for(status):
+        if status is None:
+            return [Language.label("loadingCheevos", "Loading..."), "",
+                    Language.label("cheevosBackgroundBack", "Press B to go back.")], False
         waiting = int(status.get("waiting") or 0)
         cached = int(status.get("cached") or 0)
         label = str(status.get("label") or "")
@@ -35,23 +54,39 @@ def show_background_cache():
         if waiting:
             lines.append(Language.label("cheevosBackgroundStopHint", "A stops it. B goes back."))
         else:
-            lines.append(Language.label("cheevosBackgroundIdle", "Nothing is caching in the background."))
+            lines.append(Language.label(
+                "cheevosBackgroundIdle", "Nothing is caching in the background."))
             lines.append(Language.label("cheevosBackgroundBack", "Press B to go back."))
-        Display.display_message_multiline(lines)
-        Controller.clear_last_input()
-        if not Controller.get_input(timeout=2):
-            continue
-        pressed = Controller.last_input()
-        Controller.clear_last_input()
-        if pressed == ControllerInput.B:
-            return
-        if pressed == ControllerInput.A and waiting:
-            if UserPrompt.prompt_yes_no(
-                    Language.label("cheevosBackgroundStop", "Stop background cache"),
-                    [Language.label(
-                        "cheevosBackgroundStopConfirm",
-                        "Leave the games that are still waiting. Cached games stay.")]):
-                raproxy_cli.run("clear-cache-queue")
+        return lines, waiting > 0
+
+    threading.Thread(target=poll, daemon=True).start()
+    Controller.hold_screensaver(True)
+    shown = None
+    try:
+        while True:
+            status = state["status"]
+            lines, waiting = lines_for(status)
+            if lines != shown:
+                Display.display_message_multiline(lines)
+                shown = lines
+            if not Controller.get_input(timeout=0.3):
+                continue
+            pressed = Controller.last_input()
+            Controller.clear_last_input()
+            if pressed == ControllerInput.B:
+                return
+            if pressed == ControllerInput.A and waiting:
+                if UserPrompt.prompt_yes_no(
+                        Language.label("cheevosBackgroundStop", "Stop background cache"),
+                        [Language.label(
+                            "cheevosBackgroundStopConfirm",
+                            "Leave the games that are still waiting. Cached games stay.")]):
+                    raproxy_cli.run("clear-cache-queue", timeout=15)
+                    state["status"] = raproxy_cli.run_json("cache-queue-status", "--json", timeout=15)
+                shown = None
+    finally:
+        state["stop"] = True
+        Controller.hold_screensaver(False)
 
 
 def load_platforms(root):
