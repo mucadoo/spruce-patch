@@ -55,7 +55,6 @@ SUPPORTED_ARCHIVE_EXTENSIONS = {".zip", ".7z"}
 # which bundles a 7z reader (third_party/lzma-sdk), so it never reaches zipfile.
 ZIP_READABLE_ARCHIVE_EXTENSIONS = {".zip"}
 EXCLUDED_BROWSER_DIR_NAMES = {"Imgs"}
-MAX_SCAN_ENTRIES = 5000
 MAX_SCAN_DEPTH = 12
 PACE_POLL_SECONDS = 1.0
 # RetroAchievements adds hashes over time, so a "no match" is only cached long enough to
@@ -272,9 +271,14 @@ def list_browser_files_fast(current_dir: Path) -> list[Path]:
 
 
 def list_scannable_files_recursive(root: Path) -> list[Path]:
+    """Every supported ROM under root, one platform folder at a time, A to Z.
+
+    A capped depth-first walk finished the last folders first and then stopped, so an early
+    platform such as GB or GBA was left out of a whole-library cache.
+    """
     result: list[Path] = []
     stack: list[tuple[Path, int]] = [(root, 0)]
-    while stack and len(result) < MAX_SCAN_ENTRIES:
+    while stack:
         current_dir, depth = stack.pop()
         try:
             entries = sorted(
@@ -283,18 +287,18 @@ def list_scannable_files_recursive(root: Path) -> list[Path]:
             )
         except OSError:
             continue
+        directories: list[Path] = []
         for entry in entries:
-            if len(result) >= MAX_SCAN_ENTRIES:
-                break
             if entry.name.startswith("."):
                 continue
             if entry.is_dir():
-                if entry.name in EXCLUDED_BROWSER_DIR_NAMES:
+                if entry.name in EXCLUDED_BROWSER_DIR_NAMES or depth >= MAX_SCAN_DEPTH:
                     continue
-                if depth < MAX_SCAN_DEPTH:
-                    stack.append((entry, depth + 1))
+                directories.append(entry)
             elif is_supported_browser_file(entry):
                 result.append(entry)
+        for directory in reversed(directories):
+            stack.append((directory, depth + 1))
     return result
 
 
@@ -1395,7 +1399,11 @@ def achievementsets_payload_achievements(
 
 
 def clear_cached_games(storage: Storage) -> None:
+    """Drop every downloaded game, icon, and scan marker. Login and pending awards stay."""
     storage.clear_cache()
+    storage.delete_cache_by_prefix(cache_keys.PREFIX_NO_MATCH)
+    storage.delete_cache_by_prefix(cache_keys.PREFIX_WATCH_SEEN)
+    storage.delete_cache(cache_keys.WATCH_SCANS)
     clear_all_cached_images()
 
 
