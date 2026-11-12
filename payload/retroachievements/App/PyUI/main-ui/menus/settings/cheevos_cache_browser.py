@@ -327,6 +327,25 @@ class CheevosCacheBrowser:
         if self._cache_paths(paths, Language.label("cacheSelectedCheevosTitle", "Selected games")):
             self.selected.clear()
 
+    def _yield_to_running_cache(self, add_games):
+        """A second on-screen cache fights the one already running. Offer to watch it or add to it."""
+        status = raproxy_cli.run_json("cache-queue-status", "--json", timeout=15) or {}
+        waiting = int(status.get("waiting") or 0)
+        if waiting <= 0:
+            return False
+        choice = ListOfOptionsSelectionMenu().get_selected_option_index([
+            Language.label("cheevosBackgroundSee", "See the cache that's running"),
+            Language.label("cheevosBackgroundAdd", "Add these games to it"),
+        ], Language.label(
+            "cheevosBackgroundBusy",
+            "A cache is already running. {count} games are still waiting.",
+        ).replace("{count}", str(waiting)))
+        if choice == 0:
+            show_background_cache()
+        elif choice == 1:
+            add_games()
+        return True
+
     def _cache_folder(self, path):
         estimate = raproxy_cli.run_json("estimate-cache", "--path", path, "--json") or {}
         total = int(estimate.get("candidates") or 0)
@@ -361,6 +380,11 @@ class CheevosCacheBrowser:
             if queued > 0:
                 show_background_cache()
             return
+        if self._yield_to_running_cache(lambda: (
+            self._run(["cache-folder-listing", "--path", path, "--background"], total, quiet_end=True),
+            show_background_cache(),
+        )):
+            return
         if remaining == 1:
             self._run(["cache-folder-listing", "--path", path, "--foreground"], total)
             return
@@ -385,8 +409,27 @@ class CheevosCacheBrowser:
             return
         self._run(["cache-folder-listing", "--path", path, "--foreground"], total)
 
+    def _queue_paths(self, paths):
+        handle = tempfile.NamedTemporaryFile("w", delete=False, prefix="ra-cache-", suffix=".txt")
+        try:
+            handle.write("\n".join(paths))
+            handle.close()
+            self._run(
+                ["cache-roms", "--paths-file", handle.name, "--background"],
+                len(paths),
+                quiet_end=True,
+            )
+        finally:
+            try:
+                os.remove(handle.name)
+            except OSError:
+                pass
+        show_background_cache()
+
     def _cache_paths(self, paths, title):
         if not paths:
+            return False
+        if self._yield_to_running_cache(lambda: self._queue_paths(paths)):
             return False
         mode = "--foreground"
         if len(paths) > 1:

@@ -31,7 +31,9 @@ from .network import RequestAborted, abort_requested, build_api_url, http_get, i
 from .rom_cache import (
     CacheGameAuthError,
     cache_game,
+    CacheGameUnsupported,
     filter_warning_achievement_ids,
+    is_unsupported_game_version,
     find_achievement_game_ids,
     merge_start_session_unlock_ids,
     merged_unlock_ids as merged_unlock_ids_for_user,
@@ -185,8 +187,36 @@ def cached_rom_paths_by_game(storage: Storage) -> dict[int, str]:
 
 
 def list_cached_games(storage: Storage) -> list[CachedGameEntry]:
+    drop_unsupported_cached_games(storage)
     games = cached_games_from_meta(storage.cached_game_meta())
     return sorted(games.values(), key=lambda game: game.title.lower())
+
+
+def drop_unsupported_cached_games(storage: Storage) -> int:
+    """Removes placeholder caches for ROM versions RetroAchievements does not support.
+
+    The hash still maps to that placeholder id, so a later scan treats the ROM as already
+    checked instead of downloading the same empty patch again.
+    """
+    seen: set[int] = set()
+    removed = 0
+    for meta in storage.cached_game_meta():
+        game_id = int(meta.get("gameId") or 0)
+        if game_id in seen or not is_unsupported_game_version(game_id, meta.get("title")):
+            continue
+        seen.add(game_id)
+        for entry in storage.cache_summaries_by_prefix(cache_keys.patch_prefix(game_id)):
+            path = entry.get("sourceRomPath")
+            if isinstance(path, str) and path.strip():
+                remember_no_match_path(storage, path)
+        storage.delete_cache_by_prefix(cache_keys.patch_prefix(game_id))
+        storage.delete_cache_by_prefix(f"{cache_keys.PREFIX_UNLOCKS}{game_id}:")
+        storage.delete_cache_by_prefix(f"{cache_keys.PREFIX_STARTSESSION}{game_id}:")
+        storage.delete_cache(cache_keys.last_played(game_id))
+        remove_achievementsets_for_game(storage, game_id)
+        delete_cached_images_for_game(game_id)
+        removed += 1
+    return removed
 
 
 def cached_games_from_meta(metas: list[dict]) -> dict[int, CachedGameEntry]:
@@ -681,6 +711,8 @@ def local_game_id_answer(
         if cached is None:
             return LocalGameIdAnswer()
         game_id = game_id_from_response(cached["responseBody"])
+        if is_unsupported_game_version(game_id):
+            return LocalGameIdAnswer(no_match=True)
         if game_id is not None:
             return LocalGameIdAnswer(game_id=game_id, hash_value=hash_value)
         if current - cached["cachedAt"] >= GAMEID_MISS_TTL_MS:
@@ -971,6 +1003,8 @@ def cache_queued_rom(
             )
     except RequestAborted:
         raise
+    except CacheGameUnsupported:
+        return QueuedRomOutcome.NO_MATCH, None, "Unsupported game version"
     except CacheGameAuthError as exc:
         return QueuedRomOutcome.AUTH_REJECTED, game_id, f"Caching failed: {exc}"
     except Exception as exc:
