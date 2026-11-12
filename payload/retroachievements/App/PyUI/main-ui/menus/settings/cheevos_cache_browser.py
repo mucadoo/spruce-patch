@@ -295,6 +295,9 @@ class CheevosCacheBrowser:
                 "{count} already checked, no RetroAchievements.",
             ).replace("{count}", str(no_match)))
         lines.append(Language.label("cheevosFolderOnline", "Caching needs WiFi."))
+        lines.append(Language.label(
+            "cheevosCacheNowHint",
+            "The first games cache now. The rest continues in the background."))
         lines.append(Language.label("cheevosPressB", "Press B during the cache to stop."))
         if remaining > 1 and not UserPrompt.prompt_yes_no(self._label(path), lines):
             return
@@ -425,7 +428,9 @@ class CheevosCacheBrowser:
             summary += ", " + Language.label(
                 "queuedCheevosCount", "{queued} queued").replace(
                 "{queued}", str(state["queued"]))
-        Display.display_message(f"{stopped}. {summary}", duration_ms=2500)
+            summary += ". " + Language.label(
+                "cheevosCacheContinues", "The rest continues in the background.")
+        Display.display_message(f"{stopped}. {summary}", duration_ms=4000)
 
     def _show_progress(self, phase, current, total, state):
         if phase == "skipping":

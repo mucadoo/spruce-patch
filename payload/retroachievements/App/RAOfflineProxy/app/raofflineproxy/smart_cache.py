@@ -9,6 +9,7 @@ from pathlib import Path
 
 from . import cache_budget, cache_queue, rom_browser
 from .auth import resolve_credentials
+from .network import RequestAborted, bind_abort_check, bind_interactive_cache, reset_abort_check, reset_interactive_cache, run_bounded
 from .config import detect_dolphin_config_dir, detect_ppsspp_ini
 from .platform import read_retroarch_cfg_values, resolve_retroarch_cfg
 from .rom_browser import (
@@ -268,77 +269,92 @@ def run_cache_paths(
         for path in paths_by_key.pop(rom.key, []):
             rom_result(path, ROM_RESULT_OK if succeeded else ROM_RESULT_FAIL, message)
 
-    with cache_queue.bulk_run_lock.hold(shared=True):
-        for path in paths:
-            if abort():
-                break
-            scanned += 1
-            normalized = normalize_cached_rom_path(path)
-            if normalized in known_paths:
-                skipped += 1
-                progress(PHASE_SKIPPING, scanned, total, cached, path.name)
-                game_id = game_id_by_path.get(normalized)
-                if game_id is not None:
-                    rom_browser.ensure_cached_game_icon(
-                        storage, game_id, credentials["user"], user_agent
-                    )
-                rom_result(path, ROM_RESULT_OK, "Already cached")
-                continue
-            if normalized in unsupported_paths:
-                no_match += 1
-                progress(PHASE_NO_MATCH, scanned, total, cached, path.name)
-                rom_result(path, ROM_RESULT_NO_MATCH, "No RetroAchievements match")
-                continue
-            progress(PHASE_HASHING, scanned, total, cached, path.name)
-            try:
-                candidates = rom_browser.hash_candidates_for_manual_cache(path)
-            except Exception as exc:
-                skipped += 1
-                rom_result(path, ROM_RESULT_FAIL, f"Hash failed: {exc}")
-                continue
-            if not candidates:
-                skipped += 1
-                rom_result(path, ROM_RESULT_FAIL, "Hash failed: unsupported or unreadable ROM")
-                continue
-            rom = rom_browser.enqueue_rom_if_needed(
-                storage, candidates, known_game_ids, path, on_queued=queued_this_run.append
-            )
-            if rom is None:
-                local = rom_browser.local_game_id_answer(storage, candidates)
-                if local.no_match:
+    abort_token = bind_abort_check(abort)
+    interactive_token = bind_interactive_cache(on_progress is not None)
+    try:
+        with cache_queue.bulk_run_lock.hold(shared=True):
+            for path in paths:
+                if abort():
+                    break
+                scanned += 1
+                normalized = normalize_cached_rom_path(path)
+                if normalized in known_paths:
+                    skipped += 1
+                    progress(PHASE_SKIPPING, scanned, total, cached, path.name)
+                    game_id = game_id_by_path.get(normalized)
+                    if game_id is not None:
+                        rom_browser.ensure_cached_game_icon(
+                            storage, game_id, credentials["user"], user_agent, badges=False
+                        )
+                    rom_result(path, ROM_RESULT_OK, "Already cached")
+                    continue
+                if normalized in unsupported_paths:
                     no_match += 1
-                    rom_browser.remember_no_match_path(storage, path)
                     progress(PHASE_NO_MATCH, scanned, total, cached, path.name)
                     rom_result(path, ROM_RESULT_NO_MATCH, "No RetroAchievements match")
-                else:
+                    continue
+                progress(PHASE_HASHING, scanned, total, cached, path.name)
+                try:
+                    candidates = run_bounded(
+                        lambda path=path: rom_browser.hash_candidates_for_manual_cache(path),
+                        timeout=30,
+                    )
+                except RequestAborted:
+                    break
+                except TimeoutError:
                     skipped += 1
-                    if local.game_id is not None:
-                        rom_browser.ensure_cached_game_icon(
-                            storage, local.game_id, credentials["user"], user_agent
-                        )
-                    rom_result(path, ROM_RESULT_OK)
-                continue
-            paths_by_key.setdefault(rom.key, []).append(path)
+                    rom_result(path, ROM_RESULT_FAIL, "Hash timed out")
+                    continue
+                except Exception as exc:
+                    skipped += 1
+                    rom_result(path, ROM_RESULT_FAIL, f"Hash failed: {exc}")
+                    continue
+                if not candidates:
+                    skipped += 1
+                    rom_result(path, ROM_RESULT_FAIL, "Hash failed: unsupported or unreadable ROM")
+                    continue
+                rom = rom_browser.enqueue_rom_if_needed(
+                    storage, candidates, known_game_ids, path, on_queued=queued_this_run.append
+                )
+                if rom is None:
+                    local = rom_browser.local_game_id_answer(storage, candidates)
+                    if local.no_match:
+                        no_match += 1
+                        rom_browser.remember_no_match_path(storage, path)
+                        progress(PHASE_NO_MATCH, scanned, total, cached, path.name)
+                        rom_result(path, ROM_RESULT_NO_MATCH, "No RetroAchievements match")
+                    else:
+                        skipped += 1
+                        if local.game_id is not None:
+                            rom_browser.ensure_cached_game_icon(
+                                storage, local.game_id, credentials["user"], user_agent, badges=False
+                            )
+                        rom_result(path, ROM_RESULT_OK)
+                    continue
+                paths_by_key.setdefault(rom.key, []).append(path)
 
-        if cache_now and not abort() and paths_by_key:
-            drain = rom_browser.drain_cache_queue(
-                storage,
-                config_data,
-                credentials,
-                user_agent,
-                should_pause=abort,
-                wait_for_lock=True,
-                keys=list(paths_by_key),
-                on_item=lambda current, of, label: progress(
-                    PHASE_CACHING, current, of, current - 1, label
-                ),
-                on_outcome=on_outcome,
-            )
-            cached = drain.cached
+            if cache_now and not abort() and paths_by_key:
+                drain = rom_browser.drain_cache_queue(
+                    storage,
+                    config_data,
+                    credentials,
+                    user_agent,
+                    should_pause=abort,
+                    wait_for_lock=True,
+                    keys=list(paths_by_key),
+                    interactive=on_progress is not None,
+                    on_item=lambda current, of, label: progress(
+                        PHASE_CACHING, current, of, current - 1, label
+                    ),
+                    on_outcome=on_outcome,
+                )
+                cached = drain.cached
 
-        aborted = abort()
-        if aborted:
-            cache_queue.remove_keys(storage, queued_this_run)
+            aborted = abort()
+
+    finally:
+        reset_abort_check(abort_token)
+        reset_interactive_cache(interactive_token)
 
     queued = 0
     for key, key_paths in paths_by_key.items():

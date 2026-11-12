@@ -659,6 +659,8 @@
     "clearingOfflineCache": "Clearing offline cache...",
     "clearedOfflineCache": "Offline cache cleared",
     "clearOfflineCacheFailed": "Could not clear the cache",
+    "cheevosCacheNowHint": "The first games cache now. The rest continues in the background.",
+    "cheevosCacheContinues": "The rest continues in the background.",
     "pendingCheevosAwards": "Pending Awards",
     "noPendingAwards": "No pending awards",
     "loadingCheevos": "Loading...",

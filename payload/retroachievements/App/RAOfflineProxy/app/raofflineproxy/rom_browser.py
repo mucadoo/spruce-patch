@@ -27,7 +27,7 @@ from .image_cache import (
     resolve_cached_static_asset,
     schedule_image_download,
 )
-from .network import build_api_url, http_get
+from .network import RequestAborted, abort_requested, build_api_url, http_get, interactive_cache
 from .rom_cache import (
     CacheGameAuthError,
     cache_game,
@@ -726,6 +726,7 @@ def drain_cache_queue(
     keys: list[str] | None = None,
     on_item=None,
     on_outcome=None,
+    interactive: bool = False,
 ) -> DrainResult:
     """The single place that sends RA requests for bulk caching: works through the queue oldest
     first (or through keys, in order) within the caching budget. A window allows
@@ -753,6 +754,7 @@ def drain_cache_queue(
                 None if keys is None else list(dict.fromkeys(keys)),
                 on_item,
                 on_outcome,
+                interactive,
             )
 
 
@@ -785,6 +787,7 @@ def _drain_locked(
     pending_keys: list[str] | None,
     on_item,
     on_outcome,
+    interactive: bool = False,
 ) -> DrainResult:
     cached = 0
     no_match = 0
@@ -860,7 +863,12 @@ def _drain_locked(
         games_left = cache_budget.remaining(storage)
         if games_left == 0:
             return result(DrainStop.BUDGET_EXHAUSTED, cache_budget.next_available_at(storage))
-        if requested > 0 and not paced and past_burst(storage, requested):
+        # The menu caches the first burst while the user watches, then leaves. The service
+        # spreads the rest across the window, so the screen never sits through the 18s gaps.
+        if interactive and cached >= cache_budget.CACHE_BURST_GAMES:
+            LOGGER.info("Cache queue: handed the rest to the background")
+            return result(DrainStop.BUDGET_EXHAUSTED, cache_budget.next_available_at(storage))
+        if not interactive and requested > 0 and not paced and past_burst(storage, requested):
             # Another caller, e.g. a game cached by hand, may drain while this one waits, so
             # everything is checked again afterwards.
             with lock.released(should_pause):
@@ -876,9 +884,12 @@ def _drain_locked(
             queued = len(pending_keys) if pending_keys is not None else cache_queue.count(storage)
             on_item(cached + 1, window_progress_total(cached, queued, games_left), rom.label)
         requested += 1
-        outcome, game_id, message = cache_queued_rom(
-            storage, config_data, credentials, user_agent, rom, local, known_game_ids
-        )
+        try:
+            outcome, game_id, message = cache_queued_rom(
+                storage, config_data, credentials, user_agent, rom, local, known_game_ids
+            )
+        except RequestAborted:
+            return result(DrainStop.PAUSED)
         if outcome is QueuedRomOutcome.CACHED:
             cache_budget.charge_game(storage)
         stopped = rate_limited()
@@ -921,6 +932,8 @@ def cache_queued_rom(
                 candidate_game_id = fetch_game_id(
                     hash_value, credentials, user_agent, config_data, storage
                 )
+            except RequestAborted:
+                raise
             except urllib.error.HTTPError as exc:
                 outcome = (
                     QueuedRomOutcome.AUTH_REJECTED
@@ -956,6 +969,8 @@ def cache_queued_rom(
                 cache_images=image_caching_enabled(config_data),
                 source_rom_path=rom.source_rom_path,
             )
+    except RequestAborted:
+        raise
     except CacheGameAuthError as exc:
         return QueuedRomOutcome.AUTH_REJECTED, game_id, f"Caching failed: {exc}"
     except Exception as exc:
@@ -972,12 +987,14 @@ def cache_queued_rom(
 
 
 def cache_game_badges(game_id: int, patch_body: str, user_agent: str) -> None:
-    """Saves every achievement badge synchronously so it shows on an offline unlock.
+    """Saves achievement badges so they show on an offline unlock.
 
-    The inline image executor silently drops downloads that fail (network blips on a
-    handheld are common), and badges have no fallback path — unlike the title icon,
-    which cache_game_icon fetches directly. This loops the patch data's Achievements
-    list and calls download_static_image for each badge that is not yet on disk."""
+    A cache the user is watching skips this and keeps only the title icon. The background
+    service fills badges later, and gives up after 45 seconds so one game cannot stall it.
+    """
+    if interactive_cache():
+        return
+    started = time.monotonic()
     try:
         patch_data = json.loads(patch_body).get("PatchData") or {}
     except Exception:
@@ -992,6 +1009,8 @@ def cache_game_badges(game_id: int, patch_body: str, user_agent: str) -> None:
             url = achievement.get(key)
             if not isinstance(url, str) or not url.strip():
                 continue
+            if abort_requested() or time.monotonic() - started > 45:
+                return
             image_path = extract_image_path(url)
             if image_path is None or resolve_cached_static_asset(image_path) is not None:
                 continue
@@ -999,16 +1018,16 @@ def cache_game_badges(game_id: int, patch_body: str, user_agent: str) -> None:
 
 
 def ensure_cached_game_icon(
-    storage: Storage, game_id: int, user: str, user_agent: str
+    storage: Storage, game_id: int, user: str, user_agent: str, *, badges: bool = True
 ) -> None:
-    """Downloads the title icon and achievement badges for a game that was cached before
-    those images were saved."""
+    """Downloads the title icon, and the badges unless a bulk scan asked to skip them."""
     patch_entry = storage.get_cache(cache_keys.patch(game_id, user))
     if patch_entry is None:
         return
     ua = proxy_user_agent(user_agent)
     cache_game_icon(game_id, patch_entry["responseBody"], ua)
-    cache_game_badges(game_id, patch_entry["responseBody"], ua)
+    if badges:
+        cache_game_badges(game_id, patch_entry["responseBody"], ua)
 
 
 def cache_game_icon(game_id: int, patch_body: str, user_agent: str) -> None:

@@ -8,6 +8,7 @@ import os
 import shutil
 import sys
 import threading
+import time
 import urllib.request
 import zlib
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -15,7 +16,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .config import CONFIG_DIR, RA_MEDIA_HOST
-from .network import configured_ssl_context
+from .network import abort_requested, configured_ssl_context, interactive_cache, run_bounded
 
 _IMAGE_DOWNLOAD_POOL_SIZE = 4
 _LOWEST_PRIORITY = 19
@@ -288,13 +289,17 @@ def _fetch_image(url: str, user_agent: str) -> bytes:
         return _fetch_with_urllib(url, user_agent)
     path = parts.path + (f"?{parts.query}" if parts.query else "")
     headers = {"User-Agent": user_agent, "Accept-Encoding": "identity"}
-    for attempt in range(2):
+    def _read():
         connection = _thread_connection(parts.netloc)
+        connection.request("GET", path, headers=headers)
+        response = connection.getresponse()
+        body = response.read()
+        return response, body
+
+    for attempt in range(2):
         try:
-            connection.request("GET", path, headers=headers)
-            response = connection.getresponse()
-            body = response.read()
-        except (http.client.HTTPException, OSError):
+            response, body = run_bounded(_read)
+        except (http.client.HTTPException, OSError, TimeoutError):
             # A connection the server closed while idle only shows up on the next request.
             _drop_thread_connection(parts.netloc)
             if attempt > 0:
@@ -314,8 +319,11 @@ def _fetch_with_urllib(url: str, user_agent: str) -> bytes:
         headers={"User-Agent": user_agent, "Accept-Encoding": "identity"},
         method="GET",
     )
-    with urllib.request.urlopen(request, timeout=10, context=configured_ssl_context()) as response:
-        return response.read()
+    def _read() -> bytes:
+        with urllib.request.urlopen(request, timeout=10, context=configured_ssl_context()) as response:
+            return response.read()
+
+    return run_bounded(_read)
 
 
 def _thread_connection(host: str) -> http.client.HTTPSConnection:
@@ -392,7 +400,19 @@ def images_downloaded_inline():
             pending[image_path] = item
     if not pending:
         return
-    wait([_inline_download_executor.submit(download_static_image, *item) for item in pending.values()])
+    # While the user watches, only wait long enough for the icon. The background
+    # service keeps filling badges, and a dead Wi-Fi request cannot hold the screen.
+    timeout = 8.0 if interactive_cache() else 45.0
+    pending_futures = {
+        _inline_download_executor.submit(download_static_image, *item) for item in pending.values()
+    }
+    deadline = time.monotonic() + timeout
+    while pending_futures:
+        if abort_requested() or time.monotonic() >= deadline:
+            for future in pending_futures:
+                future.cancel()
+            return
+        _done, pending_futures = wait(pending_futures, timeout=0.25)
 
 
 def shutdown_image_downloads() -> None:
