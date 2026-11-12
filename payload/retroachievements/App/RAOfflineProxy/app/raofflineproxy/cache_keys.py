@@ -15,6 +15,7 @@ PREFIX_LAST_PLAYED = "lastplayed:"
 PREFIX_CACHE_QUEUE = "cachequeue:"
 PREFIX_WATCH_SEEN = "watchseen:"
 PREFIX_NO_MATCH = "nomatch:"
+PREFIX_CACHED_ROM = "cachedrom:"
 
 
 def login(user: str) -> str:
@@ -53,7 +54,13 @@ def watch_seen(path: str) -> str:
     return f"{PREFIX_WATCH_SEEN}{path}"
 
 
-def no_match_path(path: str) -> str:
+def cached_rom_path(game_id_value: int | str, path: str) -> str:
+    return f"{PREFIX_CACHED_ROM}{game_id_value}:{path}"
+
+
+def no_match_path(path: str, reason: str = "") -> str:
+    if reason:
+        return f"{PREFIX_NO_MATCH}{reason}:{path}"
     return f"{PREFIX_NO_MATCH}{path}"
 
 

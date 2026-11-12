@@ -62,6 +62,17 @@ PACE_POLL_SECONDS = 1.0
 # RetroAchievements adds hashes over time, so a "no match" is only cached long enough to
 # stop a repeated scan of the same folder from re-querying every unsupported ROM.
 GAMEID_MISS_TTL_MS = 7 * 24 * 60 * 60 * 1000
+# A ROM RetroAchievements does not know, a known game whose dump has no set, and a file
+# that cannot be hashed are different answers. All three are settled: they are not cached
+# again until the miss expires.
+REASON_NO_ACHIEVEMENTS = "no_achievements"
+REASON_UNSUPPORTED_VERSION = "unsupported_version"
+REASON_UNREADABLE = "unreadable"
+NO_MATCH_REASONS = (
+    REASON_NO_ACHIEVEMENTS,
+    REASON_UNSUPPORTED_VERSION,
+    REASON_UNREADABLE,
+)
 
 
 @dataclass
@@ -87,6 +98,7 @@ class LocalGameIdAnswer:
     game_id: int | None = None
     hash_value: str | None = None
     no_match: bool = False
+    reason: str = ""
 
 
 class QueuedRomOutcome(enum.Enum):
@@ -123,6 +135,7 @@ class BrowserEntry:
     is_dir: bool
     is_cached: bool
     no_achievements: bool = False
+    status: str = ""
 
 
 def normalize_cached_rom_path(path: str | Path) -> str:
@@ -136,37 +149,73 @@ def normalize_cached_rom_path(path: str | Path) -> str:
 
 
 def load_cached_rom_paths(storage: Storage) -> set[str]:
-    return {
+    paths = {
         normalize_cached_rom_path(entry["sourceRomPath"])
         for entry in storage.cache_summaries_by_prefix(cache_keys.PREFIX_PATCH)
         if isinstance(entry.get("sourceRomPath"), str)
         and entry["sourceRomPath"].strip()
     }
+    prefix = cache_keys.PREFIX_CACHED_ROM
+    for key in storage.cache_keys_by_prefix(prefix):
+        _game_id, separator, path = key[len(prefix):].partition(":")
+        if separator and path:
+            paths.add(path)
+    return paths
 
 
-def remember_no_match_path(storage: Storage, path: str | Path | None) -> None:
-    """Remember a ROM RetroAchievements has no set for, so the menu can say so without hashing again."""
+def remember_no_match_path(
+    storage: Storage,
+    path: str | Path | None,
+    reason: str = REASON_NO_ACHIEVEMENTS,
+) -> None:
+    """Remember why a ROM was not cached, so the menu can say so without hashing again."""
     if path is None:
         return
     normalized = normalize_cached_rom_path(path)
     if not normalized or normalized == "/":
         return
-    storage.upsert_cache(cache_keys.no_match_path(normalized), "{}")
+    if reason not in NO_MATCH_REASONS:
+        reason = REASON_NO_ACHIEVEMENTS
+    for old_reason in NO_MATCH_REASONS:
+        storage.delete_cache(cache_keys.no_match_path(normalized, old_reason))
+    storage.delete_cache(cache_keys.no_match_path(normalized))
+    storage.upsert_cache(cache_keys.no_match_path(normalized, reason), "{}")
 
 
-def load_no_match_rom_paths(storage: Storage, now: int | None = None) -> set[str]:
-    """ROM paths whose latest check found no RetroAchievements set. A miss expires with the hash."""
+def no_match_reason_from_message(message: str) -> str:
+    text = (message or "").lower()
+    if "unsupported" in text:
+        return REASON_UNSUPPORTED_VERSION
+    if "unreadable" in text or "multiple" in text or "hash failed" in text:
+        return REASON_UNREADABLE
+    return REASON_NO_ACHIEVEMENTS
+
+
+def _reason_and_path_from_no_match_key(key: str) -> tuple[str, str] | None:
+    rest = key[len(cache_keys.PREFIX_NO_MATCH):]
+    if not rest:
+        return None
+    if rest.startswith("/"):
+        return REASON_NO_ACHIEVEMENTS, rest
+    reason, separator, path = rest.partition(":")
+    if separator and reason in NO_MATCH_REASONS and path:
+        return reason, path
+    return None
+
+
+def load_no_match_rom_paths(storage: Storage, now: int | None = None) -> dict[str, str]:
+    """ROM path to why it was not cached. A miss expires with the hash."""
     current = now if now is not None else current_millis()
-    paths: set[str] = set()
-    prefix = cache_keys.PREFIX_NO_MATCH
-    for entry in storage.cache_summaries_by_prefix(prefix):
+    paths: dict[str, str] = {}
+    for entry in storage.cache_summaries_by_prefix(cache_keys.PREFIX_NO_MATCH):
         cached_at = int(entry.get("cachedAt") or 0)
         if current - cached_at >= GAMEID_MISS_TTL_MS:
             continue
-        key = str(entry.get("cacheKey") or "")
-        path = key[len(prefix):]
-        if path:
-            paths.add(path)
+        parsed = _reason_and_path_from_no_match_key(str(entry.get("cacheKey") or ""))
+        if parsed is None:
+            continue
+        reason, path = parsed
+        paths[path] = reason
     return paths
 
 
@@ -208,7 +257,7 @@ def drop_unsupported_cached_games(storage: Storage) -> int:
         for entry in storage.cache_summaries_by_prefix(cache_keys.patch_prefix(game_id)):
             path = entry.get("sourceRomPath")
             if isinstance(path, str) and path.strip():
-                remember_no_match_path(storage, path)
+                remember_no_match_path(storage, path, REASON_UNSUPPORTED_VERSION)
         storage.delete_cache_by_prefix(cache_keys.patch_prefix(game_id))
         storage.delete_cache_by_prefix(f"{cache_keys.PREFIX_UNLOCKS}{game_id}:")
         storage.delete_cache_by_prefix(f"{cache_keys.PREFIX_STARTSESSION}{game_id}:")
@@ -275,22 +324,24 @@ def list_browser_entries_fast(current_dir: Path) -> list[Path]:
 def describe_browser_entries_fast(
     current_dir: Path,
     known_paths: set[str] | None = None,
-    no_match_paths: set[str] | None = None,
+    no_match_paths: dict[str, str] | None = None,
 ) -> list[BrowserEntry]:
     known = known_paths or set()
-    unsupported = no_match_paths or set()
+    unsupported = no_match_paths or {}
     entries: list[BrowserEntry] = []
     for path in list_browser_entries_fast(current_dir):
         normalized = normalize_cached_rom_path(path)
         is_file = not path.is_dir()
         cached = is_file and normalized in known
+        status = "" if cached or not is_file else unsupported.get(normalized, "")
         entries.append(
             BrowserEntry(
                 path=path,
                 name=path.name,
                 is_dir=path.is_dir(),
                 is_cached=cached,
-                no_achievements=is_file and not cached and normalized in unsupported,
+                no_achievements=status == REASON_NO_ACHIEVEMENTS,
+                status=status,
             )
         )
     return entries
@@ -335,21 +386,23 @@ def list_scannable_files_recursive(root: Path) -> list[Path]:
 def describe_browser_entries(
     current_dir: Path,
     storage: Storage,
-    no_match_paths: set[str] | None = None,
+    no_match_paths: dict[str, str] | None = None,
 ) -> list[BrowserEntry]:
     cached_game_ids = collect_cached_game_ids(storage)
-    unsupported = no_match_paths or set()
+    unsupported = no_match_paths or {}
     entries: list[BrowserEntry] = []
     for path in list_browser_entries(current_dir):
         normalized = normalize_cached_rom_path(path)
         cached = not path.is_dir() and browser_file_is_cached(path, storage, cached_game_ids)
+        status = "" if cached or path.is_dir() else unsupported.get(normalized, "")
         entries.append(
             BrowserEntry(
                 path=path,
                 name=path.name,
                 is_dir=path.is_dir(),
                 is_cached=cached,
-                no_achievements=not path.is_dir() and not cached and normalized in unsupported,
+                no_achievements=status == REASON_NO_ACHIEVEMENTS,
+                status=status,
             )
         )
     return entries
@@ -450,6 +503,25 @@ def select_archive_rom_names(names: list[str]) -> list[str]:
     return []
 
 
+def prefer_single_archive_rom(names: list[str], archive_name: str) -> list[str]:
+    """Pick one ROM out of an archive when the extras are not a second game.
+
+    A matching filename is the game. A lone .bin next to a cartridge ROM is a lock-on
+    companion, as in Sonic & Knuckles, and is not hashed on its own.
+    """
+    selected = select_archive_rom_names(names)
+    if len(selected) <= 1:
+        return selected
+    stem = Path(archive_name).stem.lower()
+    matched = [name for name in selected if Path(name).stem.lower() == stem]
+    if len(matched) == 1:
+        return matched
+    non_bin = [name for name in selected if Path(name).suffix.lower() != ".bin"]
+    if len(non_bin) == 1:
+        return non_bin
+    return selected
+
+
 def list_archive_rom_entries(path: Path) -> list[zipfile.ZipInfo]:
     if path.suffix.lower() not in ZIP_READABLE_ARCHIVE_EXTENSIONS:
         return []
@@ -462,7 +534,7 @@ def list_archive_rom_entries(path: Path) -> list[zipfile.ZipInfo]:
                 if not info.is_dir()
                 and not Path(info.filename).name.startswith(".")
             ]
-            selected = set(select_archive_rom_names([info.filename for info in files]))
+            selected = set(prefer_single_archive_rom([info.filename for info in files], path.name))
             return [info for info in files if info.filename in selected]
     except Exception:
         return []
@@ -475,7 +547,7 @@ def list_7z_rom_entries(path: Path) -> list[str]:
     names = [
         name for name in list_7z_entries(path) if not Path(name).name.startswith(".")
     ]
-    return select_archive_rom_names(names)
+    return prefer_single_archive_rom(names, path.name)
 
 
 def hash_candidates_for_7z(path: Path) -> list[str]:
@@ -609,7 +681,7 @@ def add_rom_to_cache(path: Path, storage: Storage, config_data: dict) -> AddRomR
 
     local = local_game_id_answer(storage, hash_candidates)
     if local.no_match:
-        remember_no_match_path(storage, path)
+        remember_no_match_path(storage, path, local.reason or REASON_NO_ACHIEVEMENTS)
         return AddRomResult(False, "No RetroAchievements match")
     if local.game_id is not None and local.game_id in cached_game_ids(storage):
         remember_source_rom_path(storage, local.game_id, credentials["user"], path)
@@ -712,12 +784,12 @@ def local_game_id_answer(
             return LocalGameIdAnswer()
         game_id = game_id_from_response(cached["responseBody"])
         if is_unsupported_game_version(game_id):
-            return LocalGameIdAnswer(no_match=True)
+            return LocalGameIdAnswer(no_match=True, reason=REASON_UNSUPPORTED_VERSION)
         if game_id is not None:
             return LocalGameIdAnswer(game_id=game_id, hash_value=hash_value)
         if current - cached["cachedAt"] >= GAMEID_MISS_TTL_MS:
             return LocalGameIdAnswer()
-    return LocalGameIdAnswer(no_match=True)
+    return LocalGameIdAnswer(no_match=True, reason=REASON_NO_ACHIEVEMENTS)
 
 
 def enqueue_rom_if_needed(
@@ -882,7 +954,9 @@ def _drain_locked(
         if local.no_match:
             cache_queue.remove(storage, rom)
             no_match += 1
-            remember_no_match_path(storage, rom.source_rom_path)
+            remember_no_match_path(
+                storage, rom.source_rom_path, REASON_UNSUPPORTED_VERSION if local.reason == REASON_UNSUPPORTED_VERSION else REASON_NO_ACHIEVEMENTS
+            )
             report(rom, QueuedRomOutcome.NO_MATCH, None, "No RetroAchievements match")
             continue
         if local.game_id is not None and local.game_id in known_game_ids:
@@ -943,7 +1017,7 @@ def _drain_locked(
                 known_game_ids.add(game_id)
         elif outcome is QueuedRomOutcome.NO_MATCH:
             no_match += 1
-            remember_no_match_path(storage, rom.source_rom_path)
+            remember_no_match_path(storage, rom.source_rom_path, no_match_reason_from_message(message))
         report(rom, outcome, game_id, message)
 
 
@@ -1107,12 +1181,21 @@ def remember_source_rom_path(
 ) -> None:
     if path is None:
         return
+    normalized = normalize_cached_rom_path(path)
+    if not normalized or normalized == "/":
+        return
+    storage.upsert_cache(cache_keys.cached_rom_path(game_id, normalized), "{}")
     patch_entry = storage.get_cache(cache_keys.patch(game_id, user))
     if patch_entry is not None:
+        previous = patch_entry.get("sourceRomPath")
+        if isinstance(previous, str) and previous.strip():
+            previous_path = normalize_cached_rom_path(previous)
+            if previous_path != normalized:
+                storage.upsert_cache(cache_keys.cached_rom_path(game_id, previous_path), "{}")
         storage.upsert_cache(
             cache_keys.patch(game_id, user),
             patch_entry["responseBody"],
-            source_rom_path=normalize_cached_rom_path(path),
+            source_rom_path=normalized,
         )
 
 
@@ -1133,6 +1216,7 @@ def remove_cached_game(storage: Storage, game_id: int) -> None:
     storage.delete_cache_by_prefix(cache_keys.patch_prefix(game_id))
     storage.delete_cache_by_prefix(f"{cache_keys.PREFIX_UNLOCKS}{game_id}:")
     storage.delete_cache_by_prefix(f"{cache_keys.PREFIX_STARTSESSION}{game_id}:")
+    storage.delete_cache_by_prefix(f"{cache_keys.PREFIX_CACHED_ROM}{game_id}:")
     storage.delete_cache(cache_keys.last_played(game_id))
     remove_achievementsets_for_game(storage, game_id)
     remove_gameid_aliases_for_game(storage, game_id)
@@ -1455,6 +1539,7 @@ def clear_cached_games(storage: Storage) -> None:
     """Drop every downloaded game, icon, and scan marker. Login and pending awards stay."""
     storage.clear_cache()
     storage.delete_cache_by_prefix(cache_keys.PREFIX_NO_MATCH)
+    storage.delete_cache_by_prefix(cache_keys.PREFIX_CACHED_ROM)
     storage.delete_cache_by_prefix(cache_keys.PREFIX_WATCH_SEEN)
     storage.delete_cache(cache_keys.WATCH_SCANS)
     clear_all_cached_images()

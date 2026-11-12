@@ -270,7 +270,9 @@ def run_cache_paths(
             targets = paths_by_key.pop(rom.key, [])
             no_match += len(targets)
             for path in targets:
-                rom_browser.remember_no_match_path(storage, path)
+                rom_browser.remember_no_match_path(
+                    storage, path, rom_browser.no_match_reason_from_message(message or "")
+                )
                 progress(PHASE_NO_MATCH, scanned, total, cached, path.name)
                 rom_result(path, ROM_RESULT_NO_MATCH, message or "No RetroAchievements match")
             return
@@ -322,12 +324,14 @@ def run_cache_paths(
                     rom_result(path, ROM_RESULT_FAIL, "Hash timed out")
                     continue
                 except Exception as exc:
-                    skipped += 1
-                    rom_result(path, ROM_RESULT_FAIL, f"Hash failed: {exc}")
+                    no_match += 1
+                    rom_browser.remember_no_match_path(storage, path, rom_browser.REASON_UNREADABLE)
+                    rom_result(path, ROM_RESULT_NO_MATCH, f"Hash failed: {exc}")
                     continue
                 if not candidates:
-                    skipped += 1
-                    rom_result(path, ROM_RESULT_FAIL, "Hash failed: unsupported or unreadable ROM")
+                    no_match += 1
+                    rom_browser.remember_no_match_path(storage, path, rom_browser.REASON_UNREADABLE)
+                    rom_result(path, ROM_RESULT_NO_MATCH, "Hash failed: unsupported or unreadable ROM")
                     continue
                 rom = rom_browser.enqueue_rom_if_needed(
                     storage, candidates, known_game_ids, path, on_queued=queued_this_run.append
@@ -336,12 +340,21 @@ def run_cache_paths(
                     local = rom_browser.local_game_id_answer(storage, candidates)
                     if local.no_match:
                         no_match += 1
-                        rom_browser.remember_no_match_path(storage, path)
+                        reason = local.reason or rom_browser.REASON_NO_ACHIEVEMENTS
+                        rom_browser.remember_no_match_path(storage, path, reason)
                         progress(PHASE_NO_MATCH, scanned, total, cached, path.name)
-                        rom_result(path, ROM_RESULT_NO_MATCH, "No RetroAchievements match")
+                        note = (
+                            "Unsupported game version"
+                            if reason == rom_browser.REASON_UNSUPPORTED_VERSION
+                            else "No RetroAchievements match"
+                        )
+                        rom_result(path, ROM_RESULT_NO_MATCH, note)
                     else:
                         skipped += 1
                         if local.game_id is not None:
+                            rom_browser.remember_source_rom_path(
+                                storage, local.game_id, credentials["user"], path
+                            )
                             rom_browser.ensure_cached_game_icon(
                                 storage, local.game_id, credentials["user"], user_agent, badges=False
                             )

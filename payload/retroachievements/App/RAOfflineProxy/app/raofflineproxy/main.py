@@ -690,7 +690,7 @@ def main() -> None:
                             [
                                 "1" if entry.is_dir else "0",
                                 "1" if entry.is_cached else "0",
-                                "1" if entry.no_achievements else "0",
+                                entry.status or ("1" if entry.no_achievements else "0"),
                                 str(entry.path),
                                 entry.name,
                             ]
@@ -724,7 +724,7 @@ def main() -> None:
                         [
                             "1" if entry.is_dir else "0",
                             "1" if entry.is_cached else "0",
-                            "1" if entry.no_achievements else "0",
+                            entry.status or ("1" if entry.no_achievements else "0"),
                             str(entry.path),
                             entry.name,
                         ]
