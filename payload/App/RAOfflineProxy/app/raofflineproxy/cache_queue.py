@@ -84,6 +84,7 @@ class QueueEstimate:
     newly_queued: int
     queued_after: int
     eta_minutes: int
+    no_match: int = 0
 
     @property
     def needs_confirmation(self) -> bool:
@@ -101,17 +102,22 @@ def estimate_queue(
     queued_now: int,
     limit: int = cache_budget.CACHE_BUDGET_LIMIT,
     window_minutes: int = cache_budget.CACHE_BUDGET_WINDOW_MS // 60_000,
+    no_match: int = 0,
 ) -> QueueEstimate:
     """Upper bound for what a bulk run will do, known before a single file is hashed: every
     candidate not already known by path may need RetroAchievements. ROMs RA doesn't know still
-    count here, so the real queue can only turn out smaller."""
+    count here, so the real queue can only turn out smaller. A path already checked and found
+    to have no set is not queued again."""
     known = max(0, min(already_known, candidates))
-    fresh = max(0, candidates - known)
+    unsupported = max(0, min(no_match, candidates - known))
+    fresh = max(0, candidates - known - unsupported)
     cached_now = min(fresh, max(0, budget_remaining))
     newly_queued = fresh - cached_now
     queued_after = queued_now + newly_queued
     eta_minutes = math.ceil(queued_after / limit) * window_minutes if queued_after else 0
-    return QueueEstimate(candidates, known, cached_now, newly_queued, queued_after, eta_minutes)
+    return QueueEstimate(
+        candidates, known, cached_now, newly_queued, queued_after, eta_minutes, unsupported
+    )
 
 
 def enqueue(storage: Storage, rom: QueuedRom) -> bool:

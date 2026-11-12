@@ -121,6 +121,7 @@ class BrowserEntry:
     name: str
     is_dir: bool
     is_cached: bool
+    no_achievements: bool = False
 
 
 def normalize_cached_rom_path(path: str | Path) -> str:
@@ -140,6 +141,32 @@ def load_cached_rom_paths(storage: Storage) -> set[str]:
         if isinstance(entry.get("sourceRomPath"), str)
         and entry["sourceRomPath"].strip()
     }
+
+
+def remember_no_match_path(storage: Storage, path: str | Path | None) -> None:
+    """Remember a ROM RetroAchievements has no set for, so the menu can say so without hashing again."""
+    if path is None:
+        return
+    normalized = normalize_cached_rom_path(path)
+    if not normalized or normalized == "/":
+        return
+    storage.upsert_cache(cache_keys.no_match_path(normalized), "{}")
+
+
+def load_no_match_rom_paths(storage: Storage, now: int | None = None) -> set[str]:
+    """ROM paths whose latest check found no RetroAchievements set. A miss expires with the hash."""
+    current = now if now is not None else current_millis()
+    paths: set[str] = set()
+    prefix = cache_keys.PREFIX_NO_MATCH
+    for entry in storage.cache_summaries_by_prefix(prefix):
+        cached_at = int(entry.get("cachedAt") or 0)
+        if current - cached_at >= GAMEID_MISS_TTL_MS:
+            continue
+        key = str(entry.get("cacheKey") or "")
+        path = key[len(prefix):]
+        if path:
+            paths.add(path)
+    return paths
 
 
 def cached_rom_paths_by_game(storage: Storage) -> dict[int, str]:
@@ -217,18 +244,27 @@ def list_browser_entries_fast(current_dir: Path) -> list[Path]:
 
 
 def describe_browser_entries_fast(
-    current_dir: Path, known_paths: set[str] | None = None
+    current_dir: Path,
+    known_paths: set[str] | None = None,
+    no_match_paths: set[str] | None = None,
 ) -> list[BrowserEntry]:
     known = known_paths or set()
-    return [
-        BrowserEntry(
-            path=path,
-            name=path.name,
-            is_dir=path.is_dir(),
-            is_cached=(not path.is_dir()) and normalize_cached_rom_path(path) in known,
+    unsupported = no_match_paths or set()
+    entries: list[BrowserEntry] = []
+    for path in list_browser_entries_fast(current_dir):
+        normalized = normalize_cached_rom_path(path)
+        is_file = not path.is_dir()
+        cached = is_file and normalized in known
+        entries.append(
+            BrowserEntry(
+                path=path,
+                name=path.name,
+                is_dir=path.is_dir(),
+                is_cached=cached,
+                no_achievements=is_file and not cached and normalized in unsupported,
+            )
         )
-        for path in list_browser_entries_fast(current_dir)
-    ]
+    return entries
 
 
 def list_browser_files_fast(current_dir: Path) -> list[Path]:
@@ -262,17 +298,24 @@ def list_scannable_files_recursive(root: Path) -> list[Path]:
     return result
 
 
-def describe_browser_entries(current_dir: Path, storage: Storage) -> list[BrowserEntry]:
+def describe_browser_entries(
+    current_dir: Path,
+    storage: Storage,
+    no_match_paths: set[str] | None = None,
+) -> list[BrowserEntry]:
     cached_game_ids = collect_cached_game_ids(storage)
+    unsupported = no_match_paths or set()
     entries: list[BrowserEntry] = []
     for path in list_browser_entries(current_dir):
+        normalized = normalize_cached_rom_path(path)
+        cached = not path.is_dir() and browser_file_is_cached(path, storage, cached_game_ids)
         entries.append(
             BrowserEntry(
                 path=path,
                 name=path.name,
                 is_dir=path.is_dir(),
-                is_cached=not path.is_dir()
-                and browser_file_is_cached(path, storage, cached_game_ids),
+                is_cached=cached,
+                no_achievements=not path.is_dir() and not cached and normalized in unsupported,
             )
         )
     return entries
@@ -532,6 +575,7 @@ def add_rom_to_cache(path: Path, storage: Storage, config_data: dict) -> AddRomR
 
     local = local_game_id_answer(storage, hash_candidates)
     if local.no_match:
+        remember_no_match_path(storage, path)
         return AddRomResult(False, "No RetroAchievements match")
     if local.game_id is not None and local.game_id in cached_game_ids(storage):
         remember_source_rom_path(storage, local.game_id, credentials["user"], path)
@@ -799,6 +843,7 @@ def _drain_locked(
         if local.no_match:
             cache_queue.remove(storage, rom)
             no_match += 1
+            remember_no_match_path(storage, rom.source_rom_path)
             report(rom, QueuedRomOutcome.NO_MATCH, None, "No RetroAchievements match")
             continue
         if local.game_id is not None and local.game_id in known_game_ids:
@@ -851,6 +896,7 @@ def _drain_locked(
                 known_game_ids.add(game_id)
         elif outcome is QueuedRomOutcome.NO_MATCH:
             no_match += 1
+            remember_no_match_path(storage, rom.source_rom_path)
         report(rom, outcome, game_id, message)
 
 

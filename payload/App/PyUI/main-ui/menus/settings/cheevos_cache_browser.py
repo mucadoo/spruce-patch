@@ -181,7 +181,9 @@ class CheevosCacheBrowser:
                 if picked:
                     badge = "Selected"
                 elif entry.get("cached"):
-                    badge = "Cached"
+                    badge = Language.label("cachedCheevosBadge", "Cached")
+                elif entry.get("no_achievements"):
+                    badge = Language.label("noAchievementsCheevos", "No achievements")
                 else:
                     badge = None
                 options.append(self._row(
@@ -256,16 +258,27 @@ class CheevosCacheBrowser:
         estimate = raproxy_cli.run_json("estimate-cache", "--path", path, "--json") or {}
         total = int(estimate.get("candidates") or 0)
         already = int(estimate.get("already_known") or 0)
+        no_match = int(estimate.get("no_match") or 0)
         remaining = int(
-            estimate.get("remaining") if estimate.get("remaining") is not None else max(0, total - already))
+            estimate.get("remaining") if estimate.get("remaining") is not None else max(0, total - already - no_match))
         if total <= 0:
             Display.display_message(
                 Language.label("noRomsInCheevosFolder", "No games in this folder"), duration_ms=2000)
             return
         if remaining <= 0:
-            Display.display_message(
-                Language.label("cheevosLibraryUpToDate", "All games already cached"),
-                duration_ms=2000)
+            if no_match > 0 and already > 0:
+                message = Language.label(
+                    "cheevosCheckedSummary",
+                    "All checked. {already} cached, {count} have no achievements.",
+                ).replace("{already}", str(already)).replace("{count}", str(no_match))
+            elif no_match > 0:
+                message = Language.label(
+                    "cheevosNoAchievementsOnly",
+                    "Already checked. These games have no RetroAchievements.",
+                )
+            else:
+                message = Language.label("cheevosLibraryUpToDate", "All games already cached")
+            Display.display_message(message, duration_ms=2500)
             return
         lines = [
             Language.label(
@@ -276,6 +289,11 @@ class CheevosCacheBrowser:
             lines.append(Language.label(
                 "cheevosFolderAlreadyCached",
                 "{already} already cached — those are skipped.").replace("{already}", str(already)))
+        if no_match > 0:
+            lines.append(Language.label(
+                "cheevosFolderNoAchievements",
+                "{count} already checked, no RetroAchievements.",
+            ).replace("{count}", str(no_match)))
         lines.append(Language.label("cheevosFolderOnline", "Caching needs WiFi."))
         lines.append(Language.label("cheevosPressB", "Press B during the cache to stop."))
         if remaining > 1 and not UserPrompt.prompt_yes_no(self._label(path), lines):
@@ -307,7 +325,7 @@ class CheevosCacheBrowser:
     @pauses_idle_shutdown
     def _run(self, args, total):
         state = {
-            "cached": 0, "failed": 0, "queued": 0, "skipped": 0,
+            "cached": 0, "failed": 0, "queued": 0, "skipped": 0, "no_match": 0,
             "current": 0, "label": "", "stopped": False,
         }
         abort_file = os.path.join(tempfile.gettempdir(), f"ra-abort-{os.getpid()}")
@@ -342,6 +360,8 @@ class CheevosCacheBrowser:
                 state["current"] = int(event.get("scanned") or 0)
                 state["cached"] = int(event.get("cached") or 0)
                 state["label"] = str(event.get("current_label") or "")
+                if event.get("no_match") is not None:
+                    state["no_match"] = int(event.get("no_match") or 0)
                 phase = str(event.get("phase") or "caching")
                 if phase == "skipping":
                     state["skipped"] += 1
@@ -351,19 +371,27 @@ class CheevosCacheBrowser:
                 state["cached"] = int(event.get("cached") or state["cached"])
                 state["queued"] = int(event.get("queued") or 0)
                 state["skipped"] = int(event.get("skipped") or state["skipped"])
+                if event.get("no_match") is not None:
+                    state["no_match"] = int(event.get("no_match") or 0)
                 return
             parts = line.split(" ", 2)
-            if parts and parts[0] in {"OK", "QUEUED", "FAIL"} and len(parts) > 1 and "/" in parts[1]:
+            if parts and parts[0] in {"OK", "QUEUED", "FAIL", "NOMATCH"} and len(parts) > 1 and "/" in parts[1]:
                 done, _, of = parts[1].partition("/")
                 state["current"] = int(done) if done.isdigit() else state["current"]
                 if parts[0] == "OK":
                     state["cached"] += 1
+                    phase = "caching"
                 elif parts[0] == "QUEUED":
                     state["queued"] += 1
+                    phase = "caching"
+                elif parts[0] == "NOMATCH":
+                    state["no_match"] += 1
+                    phase = "no_achievements"
                 else:
                     state["failed"] += 1
+                    phase = "caching"
                 state["label"] = parts[2] if len(parts) > 2 else ""
-                self._show_progress("caching", state["current"], int(of) if of.isdigit() else total, state)
+                self._show_progress(phase, state["current"], int(of) if of.isdigit() else total, state)
 
         try:
             Display.display_message_multiline([
@@ -389,6 +417,10 @@ class CheevosCacheBrowser:
             summary += ", " + Language.label(
                 "skippedCheevosCount", "{skipped} already done").replace(
                 "{skipped}", str(state["skipped"]))
+        if state["no_match"]:
+            summary += ", " + Language.label(
+                "noAchievementsCheevosCount", "{count} have no achievements").replace(
+                "{count}", str(state["no_match"]))
         if state["queued"]:
             summary += ", " + Language.label(
                 "queuedCheevosCount", "{queued} queued").replace(
@@ -398,6 +430,8 @@ class CheevosCacheBrowser:
     def _show_progress(self, phase, current, total, state):
         if phase == "skipping":
             phase_text = Language.label("cheevosPhaseSkipping", "Skipping")
+        elif phase == "no_achievements":
+            phase_text = Language.label("noAchievementsCheevos", "No achievements")
         elif phase == "hashing":
             phase_text = Language.label("cheevosPhaseChecking", "Checking")
         else:
@@ -412,6 +446,10 @@ class CheevosCacheBrowser:
             lines.append(Language.label(
                 "skippedCheevosCount", "{skipped} already done").replace(
                 "{skipped}", str(state["skipped"])))
+        if state["no_match"]:
+            lines.append(Language.label(
+                "noAchievementsCheevosCount", "{count} have no achievements").replace(
+                "{count}", str(state["no_match"])))
         lines.append("")
         lines.append(Language.label("cheevosPressB", "Press B during the cache to stop."))
         Display.display_message_multiline(lines)

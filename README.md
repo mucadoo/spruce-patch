@@ -8,7 +8,7 @@ The patched spruce files stay under the [spruceOS license](https://creativecommo
 
 ## What it changes
 
-- **Cache for offline** lets you pick a platform, a folder, or individual games. Games that are already cached are skipped.
+- **Cache for offline** lets you pick a platform, a folder, or individual games. Games that are already cached are skipped. A game that was checked and has no RetroAchievements set is marked **No achievements**, in the list and on the progress screen.
 - **Keep library offline** watches the whole library, or only the platforms you choose, and caches games you add later.
 - **Cached Games** shows each game's own icon.
 - **RetroAchievements** sits on the main settings list, under that name.

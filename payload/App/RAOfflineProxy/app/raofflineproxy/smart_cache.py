@@ -15,6 +15,7 @@ from .rom_browser import (
     QueuedRomOutcome,
     list_scannable_files_recursive,
     load_cached_rom_paths,
+    load_no_match_rom_paths,
     normalize_cached_rom_path,
 )
 from .storage import Storage
@@ -25,9 +26,11 @@ LOGGER = logging.getLogger("raofflineproxy")
 PHASE_HASHING = "hashing"
 PHASE_CACHING = "caching"
 PHASE_SKIPPING = "skipping"
+PHASE_NO_MATCH = "no_achievements"
 ROM_RESULT_OK = "ok"
 ROM_RESULT_FAIL = "fail"
 ROM_RESULT_QUEUED = "queued"
+ROM_RESULT_NO_MATCH = "no_match"
 MUOS_HISTORY_DIR = Path("/run/muos/storage/info/history")
 DOLPHIN_RECENT_WINDOW_SECONDS = 60 * 24 * 60 * 60
 DOLPHIN_GCI_CODE_REGEX = re.compile(r"^\d{2}-([A-Za-z0-9]{4})-.*\.gci$", re.IGNORECASE)
@@ -65,6 +68,7 @@ class SmartCacheProgress:
     cached: int
     current_label: str
     phase: str = PHASE_CACHING
+    no_match: int = 0
 
 
 @dataclass
@@ -74,6 +78,7 @@ class SmartCacheResult:
     cached: int
     skipped: int
     queued: int = 0
+    no_match: int = 0
 
 
 def should_offer_smart_cache(
@@ -180,11 +185,21 @@ def known_rom_paths(storage: Storage) -> set[str]:
 
 def estimate_queue_for_paths(storage: Storage, paths: list[Path]) -> cache_queue.QueueEstimate:
     known_paths = known_rom_paths(storage)
+    unsupported_paths = load_no_match_rom_paths(storage)
+    already_known = 0
+    no_match = 0
+    for path in paths:
+        normalized = normalize_cached_rom_path(path)
+        if normalized in known_paths:
+            already_known += 1
+        elif normalized in unsupported_paths:
+            no_match += 1
     return cache_queue.estimate_queue(
         candidates=len(paths),
-        already_known=sum(1 for path in paths if normalize_cached_rom_path(path) in known_paths),
+        already_known=already_known,
         budget_remaining=cache_budget.remaining(storage),
         queued_now=cache_queue.count(storage),
+        no_match=no_match,
     )
 
 
@@ -215,7 +230,7 @@ def run_cache_paths(
 
     def progress(phase: str, current: int, of: int, cached: int, label: str) -> None:
         if on_progress is not None:
-            on_progress(SmartCacheProgress(current, of, cached, label, phase))
+            on_progress(SmartCacheProgress(current, of, cached, label, phase, no_match))
 
     def rom_result(path: Path, status: str, message: str = "") -> None:
         if on_rom_result is not None:
@@ -223,6 +238,7 @@ def run_cache_paths(
 
     known_game_ids = rom_browser.cached_game_ids(storage)
     known_paths = known_rom_paths(storage)
+    unsupported_paths = load_no_match_rom_paths(storage)
     game_id_by_path = {
         path: game_id
         for game_id, path in rom_browser.cached_rom_paths_by_game(storage).items()
@@ -232,9 +248,18 @@ def run_cache_paths(
     scanned = 0
     skipped = 0
     cached = 0
+    no_match = 0
 
     def on_outcome(rom, outcome, _game_id, message) -> None:
-        nonlocal skipped
+        nonlocal skipped, no_match
+        if outcome is QueuedRomOutcome.NO_MATCH:
+            targets = paths_by_key.pop(rom.key, [])
+            no_match += len(targets)
+            for path in targets:
+                rom_browser.remember_no_match_path(storage, path)
+                progress(PHASE_NO_MATCH, scanned, total, cached, path.name)
+                rom_result(path, ROM_RESULT_NO_MATCH, message or "No RetroAchievements match")
+            return
         if outcome is QueuedRomOutcome.FAILED:
             return
         if outcome is not QueuedRomOutcome.CACHED:
@@ -259,6 +284,11 @@ def run_cache_paths(
                     )
                 rom_result(path, ROM_RESULT_OK, "Already cached")
                 continue
+            if normalized in unsupported_paths:
+                no_match += 1
+                progress(PHASE_NO_MATCH, scanned, total, cached, path.name)
+                rom_result(path, ROM_RESULT_NO_MATCH, "No RetroAchievements match")
+                continue
             progress(PHASE_HASHING, scanned, total, cached, path.name)
             try:
                 candidates = rom_browser.hash_candidates_for_manual_cache(path)
@@ -274,11 +304,14 @@ def run_cache_paths(
                 storage, candidates, known_game_ids, path, on_queued=queued_this_run.append
             )
             if rom is None:
-                skipped += 1
                 local = rom_browser.local_game_id_answer(storage, candidates)
                 if local.no_match:
-                    rom_result(path, ROM_RESULT_FAIL, "No RetroAchievements match")
+                    no_match += 1
+                    rom_browser.remember_no_match_path(storage, path)
+                    progress(PHASE_NO_MATCH, scanned, total, cached, path.name)
+                    rom_result(path, ROM_RESULT_NO_MATCH, "No RetroAchievements match")
                 else:
+                    skipped += 1
                     if local.game_id is not None:
                         rom_browser.ensure_cached_game_icon(
                             storage, local.game_id, credentials["user"], user_agent
@@ -323,6 +356,7 @@ def run_cache_paths(
         cached=cached,
         skipped=skipped,
         queued=queued,
+        no_match=no_match,
     )
 
 
