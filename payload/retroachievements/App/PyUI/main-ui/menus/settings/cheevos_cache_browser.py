@@ -16,6 +16,44 @@ from views.view_creator import ViewCreator
 from views.view_type import ViewType
 
 
+def show_background_cache():
+    """Live count of games the service is still caching. A stops that queue."""
+    while True:
+        status = raproxy_cli.run_json("cache-queue-status", "--json") or {}
+        waiting = int(status.get("waiting") or 0)
+        cached = int(status.get("cached") or 0)
+        label = str(status.get("label") or "")
+        lines = [
+            Language.label("cheevosBackgroundWaiting", "{count} games still waiting").replace(
+                "{count}", str(waiting)),
+            Language.label("cheevosBackgroundCached", "{count} games cached").replace(
+                "{count}", str(cached)),
+        ]
+        if waiting and label:
+            lines.append(label)
+        lines.append("")
+        if waiting:
+            lines.append(Language.label("cheevosBackgroundStopHint", "A stops it. B goes back."))
+        else:
+            lines.append(Language.label("cheevosBackgroundIdle", "Nothing is caching in the background."))
+            lines.append(Language.label("cheevosBackgroundBack", "Press B to go back."))
+        Display.display_message_multiline(lines)
+        Controller.clear_last_input()
+        if not Controller.get_input(timeout=2):
+            continue
+        pressed = Controller.last_input()
+        Controller.clear_last_input()
+        if pressed == ControllerInput.B:
+            return
+        if pressed == ControllerInput.A and waiting:
+            if UserPrompt.prompt_yes_no(
+                    Language.label("cheevosBackgroundStop", "Stop background cache"),
+                    [Language.label(
+                        "cheevosBackgroundStopConfirm",
+                        "Leave the games that are still waiting. Cached games stay.")]):
+                raproxy_cli.run("clear-cache-queue")
+
+
 def load_platforms(root):
     """Platforms that actually have games, using the same names and icons as the main menu."""
     from devices.device import Device
@@ -259,14 +297,20 @@ class CheevosCacheBrowser:
         total = int(estimate.get("candidates") or 0)
         already = int(estimate.get("already_known") or 0)
         no_match = int(estimate.get("no_match") or 0)
+        queued = int(estimate.get("queued") or 0)
         remaining = int(
-            estimate.get("remaining") if estimate.get("remaining") is not None else max(0, total - already - no_match))
+            estimate.get("remaining") if estimate.get("remaining") is not None else max(0, total - already - no_match - queued))
         if total <= 0:
             Display.display_message(
                 Language.label("noRomsInCheevosFolder", "No games in this folder"), duration_ms=2000)
             return
         if remaining <= 0:
-            if no_match > 0 and already > 0:
+            if queued > 0:
+                message = Language.label(
+                    "cheevosBackgroundStill",
+                    "{cached} cached. {queued} still caching in the background.",
+                ).replace("{cached}", str(already)).replace("{queued}", str(queued))
+            elif no_match > 0 and already > 0:
                 message = Language.label(
                     "cheevosCheckedSummary",
                     "All checked. {already} cached, {count} have no achievements.",
@@ -279,45 +323,57 @@ class CheevosCacheBrowser:
             else:
                 message = Language.label("cheevosLibraryUpToDate", "All games already cached")
             Display.display_message(message, duration_ms=2500)
+            if queued > 0:
+                show_background_cache()
             return
-        lines = [
-            Language.label(
-                "cheevosFolderRemaining",
-                "{remaining} games still need caching.").replace("{remaining}", str(remaining)),
-        ]
-        if already > 0:
-            lines.append(Language.label(
-                "cheevosFolderAlreadyCached",
-                "{already} already cached — those are skipped.").replace("{already}", str(already)))
-        if no_match > 0:
-            lines.append(Language.label(
-                "cheevosFolderNoAchievements",
-                "{count} already checked, no RetroAchievements.",
-            ).replace("{count}", str(no_match)))
-        lines.append(Language.label("cheevosFolderOnline", "Caching needs WiFi."))
-        lines.append(Language.label(
-            "cheevosCacheNowHint",
-            "The first games cache now. The rest continues in the background."))
-        lines.append(Language.label("cheevosPressB", "Press B during the cache to stop."))
-        if remaining > 1 and not UserPrompt.prompt_yes_no(self._label(path), lines):
+        if remaining == 1:
+            self._run(["cache-folder-listing", "--path", path, "--foreground"], total)
             return
-        self._run(["cache-folder-listing", "--path", path], total)
+        title = Language.label(
+            "cheevosFolderRemaining",
+            "{remaining} games still need caching.",
+        ).replace("{remaining}", str(remaining))
+        if queued:
+            title = Language.label(
+                "cheevosChooseWithQueue",
+                "{remaining} to cache. {queued} already waiting.",
+            ).replace("{remaining}", str(remaining)).replace("{queued}", str(queued))
+        choice = ListOfOptionsSelectionMenu().get_selected_option_index([
+            Language.label("cheevosCacheOnScreen", "Cache on screen"),
+            Language.label("cheevosCacheInBackground", "Cache in the background"),
+        ], title)
+        if choice is None:
+            return
+        if choice == 1:
+            self._run(["cache-folder-listing", "--path", path, "--background"], total, quiet_end=True)
+            show_background_cache()
+            return
+        self._run(["cache-folder-listing", "--path", path, "--foreground"], total)
 
     def _cache_paths(self, paths, title):
         if not paths:
             return False
-        if len(paths) > 1 and not UserPrompt.prompt_yes_no(title, [
-                Language.label("cheevosFolderGames", "Up to {games} games to cache.").replace(
-                    "{games}", str(len(paths))),
-                Language.label("cheevosFolderOnline", "Caching needs WiFi."),
-                Language.label("cheevosPressB", "Press B during the cache to stop."),
-        ]):
-            return False
+        mode = "--foreground"
+        if len(paths) > 1:
+            choice = ListOfOptionsSelectionMenu().get_selected_option_index([
+                Language.label("cheevosCacheOnScreen", "Cache on screen"),
+                Language.label("cheevosCacheInBackground", "Cache in the background"),
+            ], title)
+            if choice is None:
+                return False
+            if choice == 1:
+                mode = "--background"
         handle = tempfile.NamedTemporaryFile("w", delete=False, prefix="ra-cache-", suffix=".txt")
         try:
             handle.write("\n".join(paths))
             handle.close()
-            self._run(["cache-roms", "--paths-file", handle.name], len(paths))
+            self._run(
+                ["cache-roms", "--paths-file", handle.name, mode],
+                len(paths),
+                quiet_end=(mode == "--background"),
+            )
+            if mode == "--background":
+                show_background_cache()
         finally:
             try:
                 os.remove(handle.name)
@@ -326,7 +382,7 @@ class CheevosCacheBrowser:
         return True
 
     @pauses_idle_shutdown
-    def _run(self, args, total):
+    def _run(self, args, total, quiet_end=False):
         state = {
             "cached": 0, "failed": 0, "queued": 0, "skipped": 0, "no_match": 0,
             "current": 0, "label": "", "stopped": False,
@@ -368,6 +424,8 @@ class CheevosCacheBrowser:
                 phase = str(event.get("phase") or "caching")
                 if phase == "skipping":
                     state["skipped"] += 1
+                elif phase == "queued":
+                    state["queued"] += 1
                 self._show_progress(phase, state["current"], int(event.get("total") or total), state)
                 return
             if isinstance(event, dict) and event.get("type") == "result":
@@ -428,13 +486,14 @@ class CheevosCacheBrowser:
             summary += ", " + Language.label(
                 "queuedCheevosCount", "{queued} queued").replace(
                 "{queued}", str(state["queued"]))
-            summary += ". " + Language.label(
-                "cheevosCacheContinues", "The rest continues in the background.")
-        Display.display_message(f"{stopped}. {summary}", duration_ms=4000)
+        if not quiet_end:
+            Display.display_message(f"{stopped}. {summary}", duration_ms=2500)
 
     def _show_progress(self, phase, current, total, state):
         if phase == "skipping":
             phase_text = Language.label("cheevosPhaseSkipping", "Skipping")
+        elif phase == "queued":
+            phase_text = Language.label("cheevosPhaseWaiting", "Waiting")
         elif phase == "no_achievements":
             phase_text = Language.label("noAchievementsCheevos", "No achievements")
         elif phase == "hashing":

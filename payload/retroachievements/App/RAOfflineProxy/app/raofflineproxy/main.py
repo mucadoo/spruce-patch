@@ -7,6 +7,7 @@ import os
 import sys
 from pathlib import Path
 
+from . import cache_queue
 from .auth import resolve_credentials
 from .config import (
     CONFIG_FILE,
@@ -272,6 +273,7 @@ def estimate_payload(estimate) -> dict:
         "queued_after": estimate.queued_after,
         "eta_minutes": estimate.eta_minutes,
         "needs_confirmation": estimate.needs_confirmation,
+        "queued": estimate.waiting,
     }
 
 
@@ -309,6 +311,8 @@ def main() -> None:
             "export-cached-ids",
             "cache-folder-listing",
             "estimate-cache",
+            "cache-queue-status",
+            "clear-cache-queue",
             "watch-folder",
             "unwatch-folder",
             "watched-folders",
@@ -342,6 +346,18 @@ def main() -> None:
         dest="as_json",
         action="store_true",
         help="Print machine-readable output",
+    )
+    parser.add_argument(
+        "--background",
+        dest="background",
+        action="store_true",
+        help="Queue the games and let the service cache them",
+    )
+    parser.add_argument(
+        "--foreground",
+        dest="foreground",
+        action="store_true",
+        help="Cache on screen and drop whatever this run does not finish",
     )
     parser.add_argument(
         "--paths-file",
@@ -754,6 +770,9 @@ def main() -> None:
                     existing_paths,
                     should_abort=should_abort_from_env,
                     on_rom_result=on_rom_result,
+                    cache_now=not args.background,
+                    keep_queued=not args.foreground,
+                    interactive=bool(args.foreground),
                 )
             finally:
                 storage.close()
@@ -825,6 +844,29 @@ def main() -> None:
                 print(json.dumps(payload, separators=(",", ":")))
             else:
                 print(" ".join(f"{key}={json.dumps(value)}" for key, value in payload.items()))
+            return
+
+        if args.command == "cache-queue-status":
+            storage = Storage()
+            try:
+                waiting_rom = cache_queue.oldest(storage)
+                payload = {
+                    "waiting": cache_queue.count(storage),
+                    "cached": len(list_cached_games(storage)),
+                    "label": waiting_rom.label if waiting_rom is not None else "",
+                }
+            finally:
+                storage.close()
+            print(json.dumps(payload, separators=(",", ":")))
+            return
+
+        if args.command == "clear-cache-queue":
+            storage = Storage()
+            try:
+                removed = cache_queue.clear(storage)
+            finally:
+                storage.close()
+            print(f"Stopped background cache, {removed} left waiting")
             return
 
         if args.command == "watch-folder":
@@ -919,6 +961,8 @@ def main() -> None:
                     current_dir,
                     should_abort=should_abort_from_env,
                     on_progress=on_progress,
+                    cache_now=not args.background,
+                    keep_queued=not args.foreground,
                 )
             finally:
                 storage.close()

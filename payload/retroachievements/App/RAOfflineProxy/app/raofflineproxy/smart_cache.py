@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from . import cache_budget, cache_queue, rom_browser
@@ -167,6 +167,7 @@ def run_folder_cache(
     should_abort=None,
     on_progress=None,
     cache_now: bool = True,
+    keep_queued: bool = True,
 ) -> SmartCacheResult:
     return run_cache_paths(
         storage,
@@ -175,6 +176,7 @@ def run_folder_cache(
         should_abort=should_abort,
         on_progress=on_progress,
         cache_now=cache_now,
+        keep_queued=keep_queued,
     )
 
 
@@ -185,23 +187,28 @@ def known_rom_paths(storage: Storage) -> set[str]:
 
 
 def estimate_queue_for_paths(storage: Storage, paths: list[Path]) -> cache_queue.QueueEstimate:
-    known_paths = known_rom_paths(storage)
+    cached_paths = load_cached_rom_paths(storage)
+    queued_paths = cache_queue.queued_rom_paths(storage, normalize_cached_rom_path)
     unsupported_paths = load_no_match_rom_paths(storage)
-    already_known = 0
+    cached = 0
+    waiting = 0
     no_match = 0
     for path in paths:
         normalized = normalize_cached_rom_path(path)
-        if normalized in known_paths:
-            already_known += 1
+        if normalized in cached_paths:
+            cached += 1
+        elif normalized in queued_paths:
+            waiting += 1
         elif normalized in unsupported_paths:
             no_match += 1
-    return cache_queue.estimate_queue(
+    estimate = cache_queue.estimate_queue(
         candidates=len(paths),
-        already_known=already_known,
+        already_known=cached + waiting,
         budget_remaining=cache_budget.remaining(storage),
         queued_now=cache_queue.count(storage),
         no_match=no_match,
     )
+    return replace(estimate, already_known=cached, waiting=waiting)
 
 
 def run_cache_paths(
@@ -213,6 +220,8 @@ def run_cache_paths(
     on_progress=None,
     on_rom_result=None,
     cache_now: bool = True,
+    keep_queued: bool = True,
+    interactive: bool | None = None,
 ) -> SmartCacheResult:
     """Hashes every ROM first, which only fills the queue, then caches the current budget window
     right away; the rest stays queued for the proxy service. Without cache_now the whole run is
@@ -238,7 +247,10 @@ def run_cache_paths(
             on_rom_result(path, status, message)
 
     known_game_ids = rom_browser.cached_game_ids(storage)
-    known_paths = known_rom_paths(storage)
+    cached_paths = load_cached_rom_paths(storage)
+    queued_paths = cache_queue.queued_rom_paths(storage, normalize_cached_rom_path)
+    known_paths = cached_paths | queued_paths
+    watching = (on_progress is not None) if interactive is None else interactive
     unsupported_paths = load_no_match_rom_paths(storage)
     game_id_by_path = {
         path: game_id
@@ -270,7 +282,7 @@ def run_cache_paths(
             rom_result(path, ROM_RESULT_OK if succeeded else ROM_RESULT_FAIL, message)
 
     abort_token = bind_abort_check(abort)
-    interactive_token = bind_interactive_cache(on_progress is not None)
+    interactive_token = bind_interactive_cache(watching)
     try:
         with cache_queue.bulk_run_lock.hold(shared=True):
             for path in paths:
@@ -278,6 +290,9 @@ def run_cache_paths(
                     break
                 scanned += 1
                 normalized = normalize_cached_rom_path(path)
+                if normalized in queued_paths and normalized not in cached_paths:
+                    progress("queued", scanned, total, cached, path.name)
+                    continue
                 if normalized in known_paths:
                     skipped += 1
                     progress(PHASE_SKIPPING, scanned, total, cached, path.name)
@@ -342,7 +357,7 @@ def run_cache_paths(
                     should_pause=abort,
                     wait_for_lock=True,
                     keys=list(paths_by_key),
-                    interactive=on_progress is not None,
+                    interactive=watching,
                     on_item=lambda current, of, label: progress(
                         PHASE_CACHING, current, of, current - 1, label
                     ),
@@ -351,6 +366,8 @@ def run_cache_paths(
                 cached = drain.cached
 
             aborted = abort()
+            if not keep_queued:
+                cache_queue.remove_keys(storage, list(queued_this_run))
 
     finally:
         reset_abort_check(abort_token)

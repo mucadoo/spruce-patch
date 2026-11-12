@@ -85,6 +85,7 @@ class QueueEstimate:
     queued_after: int
     eta_minutes: int
     no_match: int = 0
+    waiting: int = 0
 
     @property
     def needs_confirmation(self) -> bool:
@@ -159,6 +160,13 @@ def remove_keys(storage: Storage, keys) -> None:
 
 def count(storage: Storage) -> int:
     return storage.count_cache_by_prefix(cache_keys.PREFIX_CACHE_QUEUE)
+
+
+def clear(storage: Storage) -> int:
+    """Drops every ROM still waiting. Games already cached stay."""
+    waiting = count(storage)
+    storage.delete_cache_by_prefix(cache_keys.PREFIX_CACHE_QUEUE)
+    return waiting
 
 
 def queued_rom_paths(storage: Storage, normalize) -> set[str]:
