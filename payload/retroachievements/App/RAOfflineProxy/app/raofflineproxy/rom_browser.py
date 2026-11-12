@@ -20,6 +20,7 @@ from .es_export import collect_cached_game_ids
 from .image_cache import (
     clear_all_cached_images,
     delete_cached_images_for_game,
+    discard_incomplete_downloads,
     download_static_image,
     extract_image_path,
     game_image_dir,
@@ -160,6 +161,8 @@ def load_cached_rom_paths(storage: Storage) -> set[str]:
         _game_id, separator, path = key[len(prefix):].partition(":")
         if separator and path:
             paths.add(path)
+    # A ROM still in the queue is not finished, even if a patch was written before a power cut.
+    paths -= cache_queue.queued_rom_paths(storage, normalize_cached_rom_path)
     return paths
 
 
@@ -235,10 +238,66 @@ def cached_rom_paths_by_game(storage: Storage) -> dict[int, str]:
     return {game_id: path for game_id, (_cached_at, path) in latest.items()}
 
 
+def game_record_complete(storage: Storage, game_id: int, user: str) -> bool:
+    return (
+        storage.get_cache(cache_keys.patch(game_id, user)) is not None
+        and storage.get_cache(cache_keys.unlocks(game_id, user)) is not None
+        and storage.get_cache(cache_keys.start_session(game_id, user)) is not None
+    )
+
+
+def game_record_complete_any(storage: Storage, game_id: int) -> bool:
+    for key in storage.cache_keys_by_prefix(cache_keys.patch_prefix(game_id)):
+        parts = key.split(":")
+        user = parts[2] if len(parts) >= 3 else ""
+        if game_record_complete(storage, game_id, user):
+            return True
+    return False
+
+
+def resume_interrupted_cache(storage: Storage) -> int:
+    """Drop half-written games that are still queued, and leftover image downloads.
+
+    The queue row stays, so the next pass writes the whole game again. Called when the
+    service starts and whenever the menu asks what is still caching.
+    """
+    discard_incomplete_downloads()
+    queued = cache_queue.queued_rom_paths(storage, normalize_cached_rom_path)
+    if not queued:
+        return 0
+    removed = 0
+    seen: set[int] = set()
+    for entry in storage.cache_summaries_by_prefix(cache_keys.PREFIX_PATCH):
+        path = entry.get("sourceRomPath")
+        if not isinstance(path, str) or normalize_cached_rom_path(path) not in queued:
+            continue
+        game_id = cache_keys.parse_game_id_from_patch_key(str(entry.get("cacheKey") or ""))
+        if game_id is None or game_id in seen:
+            continue
+        parts = str(entry.get("cacheKey") or "").split(":")
+        user = parts[2] if len(parts) >= 3 else ""
+        if game_record_complete(storage, game_id, user):
+            continue
+        seen.add(game_id)
+        remove_cached_game(storage, game_id)
+        removed += 1
+    if removed:
+        LOGGER.info("Dropped %d half-cached game(s); they stay queued", removed)
+    return removed
+
+
 def list_cached_games(storage: Storage) -> list[CachedGameEntry]:
     drop_unsupported_cached_games(storage)
+    resume_interrupted_cache(storage)
     games = cached_games_from_meta(storage.cached_game_meta())
-    return sorted(games.values(), key=lambda game: game.title.lower())
+    queued = cache_queue.queued_rom_paths(storage, normalize_cached_rom_path)
+    paths = cached_rom_paths_by_game(storage)
+    visible = [
+        game
+        for game in games.values()
+        if paths.get(game.game_id) not in queued
+    ]
+    return sorted(visible, key=lambda game: game.title.lower())
 
 
 def drop_unsupported_cached_games(storage: Storage) -> int:
@@ -806,7 +865,11 @@ def enqueue_rom_if_needed(
     local = local_game_id_answer(storage, candidates, now)
     if local.no_match:
         return None
-    if local.game_id is not None and local.game_id in known_game_ids:
+    if (
+        local.game_id is not None
+        and local.game_id in known_game_ids
+        and game_record_complete_any(storage, local.game_id)
+    ):
         return None
     rom = QueuedRom(
         hashes=candidates,
@@ -900,6 +963,7 @@ def _drain_locked(
     paced = False
     started_at = current_millis()
     stop_at = started_at + cache_budget.CACHE_BATCH_MAX_MS
+    resume_interrupted_cache(storage)
     known_game_ids = cached_game_ids(storage)
 
     def result(
@@ -1058,7 +1122,7 @@ def cache_queued_rom(
         return QueuedRomOutcome.NO_MATCH, None, "No RetroAchievements match"
 
     persist_game_id_aliases(storage, rom.hashes, used_hash, game_id)
-    if game_id in known_game_ids:
+    if game_id in known_game_ids and game_record_complete(storage, game_id, credentials["user"]):
         remember_source_rom_path(storage, game_id, credentials["user"], rom.source_rom_path)
         ensure_cached_game_icon(storage, game_id, credentials["user"], user_agent)
         return QueuedRomOutcome.ALREADY_CACHED, game_id, ""

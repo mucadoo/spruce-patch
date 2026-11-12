@@ -55,6 +55,18 @@ STATIC_SHARDS = 256
 IMAGE_PATH_PREFIXES = ("/Badge/", "/Images/", "/UserPic/")
 
 
+def discard_incomplete_downloads() -> None:
+    """Remove image files left behind when the power was cut during a download."""
+    for root in (STATIC_DIR, GAMES_DIR):
+        if not root.is_dir():
+            continue
+        for path in root.rglob("*.tmp"):
+            try:
+                path.unlink()
+            except OSError:
+                continue
+
+
 def game_image_dir(game_id: int) -> Path:
     return GAMES_DIR / str(game_id)
 
@@ -275,7 +287,9 @@ def download_static_image(
             icon_file = game_image_dir(game_id) / "icon.png"
             if not icon_file.exists():
                 icon_file.parent.mkdir(parents=True, exist_ok=True)
-                icon_file.write_bytes(target.read_bytes())
+                temporary = icon_file.with_suffix(".png.tmp")
+                temporary.write_bytes(target.read_bytes())
+                temporary.replace(icon_file)
     except Exception as exc:
         LOGGER.debug("Failed to cache image path=%s: %s", image_path, exc)
 
