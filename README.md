@@ -20,6 +20,10 @@ The patched spruce files stay under the [spruceOS license](https://creativecommo
 
 Frames for Game Boy, Game Boy Color, and GBA, using the overlay art already on the spruce card. NES, SNES, and Genesis stay full screen. That matches Knulli's default bezel pack on a 4:3 screen: those consoles were made for a 4:3 TV, so the pack has no frame for them there. Game Boy and GBA do.
 
+**Sharp shader**
+
+Knulli's default shader, sharp-bilinear-simple, on Game Boy, Game Boy Color, GBA, NES, SNES, and Genesis. Bilinear smoothing is turned off so the shader does the scaling. The shader file is already part of spruce. If you also install handheld bezels, the frames stay.
+
 ## Install
 
 You need Windows, a spruceOS **4.6.0** card, and the card's volume name set to **SPRUCE** (that is the stock name).

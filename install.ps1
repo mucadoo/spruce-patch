@@ -65,19 +65,50 @@ foreach ($required in @('App\PyUI', 'spruce', 'RetroArch')) {
     }
 }
 
+function Merge-RetroarchCfg($sources) {
+    $settings = [ordered]@{}
+    foreach ($source in $sources) {
+        foreach ($line in [System.IO.File]::ReadAllLines($source)) {
+            if ($line -match '^\s*([^=#]+?)\s*=\s*(.*)$') {
+                $settings[$Matches[1].Trim()] = $line.Trim()
+            }
+        }
+    }
+    $text = (($settings.Values) -join "`n") + "`n"
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("spruce-cfg-" + [guid]::NewGuid().ToString() + ".cfg")
+    [System.IO.File]::WriteAllText($tmp, $text)
+    return $tmp
+}
+
 $skip = @('spruce-config.json', 'config.json', 'proxy.sqlite3')
-$files = @()
+$found = @()
 foreach ($feature in $selected) {
     $featureDir = Join-Path $payload ([string]$feature.id)
     if (-not (Test-Path -LiteralPath $featureDir)) { throw "Missing payload folder for $($feature.name)." }
-    $files += @(Get-ChildItem -LiteralPath $featureDir -Recurse -File | ForEach-Object {
+    $found += @(Get-ChildItem -LiteralPath $featureDir -Recurse -File | ForEach-Object {
         $rel = $_.FullName.Substring($featureDir.Length).TrimStart('\')
         [pscustomobject]@{ Source = $_.FullName; Rel = $rel; Name = $_.Name; Feature = [string]$feature.name }
     } | Where-Object {
         $_.Name -notin $skip -and $_.Rel -notmatch '(^|\\)(image_cache|__pycache__)(\\|$)' -and $_.Name -notlike '*.pyc'
     })
 }
-if (-not $files) { throw 'Nothing to install for that choice. Re-download the patch.' }
+if (-not $found) { throw 'Nothing to install for that choice. Re-download the patch.' }
+
+# Two pieces can own the same RetroArch cfg. Combine their settings instead of letting one erase the other.
+$files = @()
+foreach ($group in ($found | Group-Object Rel)) {
+    $items = @($group.Group)
+    if ($items.Count -gt 1 -and $items[0].Name -like '*.cfg') {
+        $files += [pscustomobject]@{
+            Source = Merge-RetroarchCfg @($items.Source)
+            Rel    = $items[0].Rel
+            Name   = $items[0].Name
+            Feature = ($items.Feature -join ' + ')
+        }
+    } else {
+        $files += $items[0]
+    }
+}
 
 Write-Host ''
 Write-Host "Installing:"
