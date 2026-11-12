@@ -128,22 +128,28 @@ def _duration_text(minutes):
     return f"{round(minutes / 60)} hours"
 
 
-def watch_folder(path, title, confirm=True):
+def watch_folder(path, title, confirm=True, skip_existing=False, defer_scan=False):
     from display.display import Display
     from utils.user_prompt import UserPrompt
 
-    Display.display_message(Language.label("checkingCheevosFolder", "Checking games..."))
     path = os.path.abspath(path)
-    estimate = run_json("estimate-cache", "--path", path, "--json") or {}
-    if confirm and estimate.get("needs_confirmation"):
-        games = estimate.get("cached_now", 0) + estimate.get("newly_queued", 0)
-        if not UserPrompt.prompt_yes_no(title, [
-                Language.label("cheevosFolderGames", "Up to {games} games to cache.").replace("{games}", str(games)),
-                Language.label("cheevosFolderTime", "This happens in the background over about {time}.")
-                    .replace("{time}", _duration_text(estimate.get("eta_minutes", 0))),
-                Language.label("cheevosFolderOnline", "Caching needs WiFi.")]):
-            return False
-    if run("watch-folder", "--path", path) is None:
+    if confirm:
+        Display.display_message(Language.label("checkingCheevosFolder", "Checking games..."))
+        estimate = run_json("estimate-cache", "--path", path, "--json") or {}
+        if estimate.get("needs_confirmation"):
+            games = estimate.get("cached_now", 0) + estimate.get("newly_queued", 0)
+            if not UserPrompt.prompt_yes_no(title, [
+                    Language.label("cheevosFolderGames", "Up to {games} games to cache.").replace("{games}", str(games)),
+                    Language.label("cheevosFolderTime", "This happens in the background over about {time}.")
+                        .replace("{time}", _duration_text(estimate.get("eta_minutes", 0))),
+                    Language.label("cheevosFolderOnline", "Caching needs WiFi.")]):
+                return False
+    args = ["watch-folder", "--path", path]
+    if skip_existing:
+        args.append("--skip-existing")
+    elif defer_scan:
+        args.append("--defer-scan")
+    if run(*args, timeout=600) is None:
         return False
     is_watched(path)
     _watched.add(path)
