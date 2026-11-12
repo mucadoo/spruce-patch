@@ -45,11 +45,20 @@ def list_folder(path):
         parts = line.split("\t")
         if len(parts) < 4:
             continue
+        if len(parts) >= 5:
+            no_achievements = parts[2] == "1"
+            path = parts[3]
+            name = parts[4]
+        else:
+            no_achievements = False
+            path = parts[2]
+            name = parts[3]
         entries.append({
             "is_dir": parts[0] == "1",
             "cached": parts[1] == "1",
-            "path": parts[2],
-            "name": parts[3],
+            "no_achievements": no_achievements,
+            "path": path,
+            "name": name,
         })
     return entries
 

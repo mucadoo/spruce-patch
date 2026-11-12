@@ -75,11 +75,13 @@ from .rom_browser import (
     describe_browser_entries_fast,
     list_cached_games,
     load_cached_rom_paths,
+    load_no_match_rom_paths,
     list_scannable_files_recursive,
     remove_cached_game,
 )
 from .smart_cache import (
     ROM_RESULT_FAIL,
+    ROM_RESULT_NO_MATCH,
     ROM_RESULT_OK,
     ROM_RESULT_QUEUED,
     estimate_queue_for_paths,
@@ -263,6 +265,7 @@ def estimate_payload(estimate) -> dict:
     return {
         "candidates": estimate.candidates,
         "already_known": estimate.already_known,
+        "no_match": estimate.no_match,
         "remaining": estimate.remaining,
         "cached_now": estimate.cached_now,
         "newly_queued": estimate.newly_queued,
@@ -649,12 +652,14 @@ def main() -> None:
 
             storage = Storage()
             try:
-                for entry in describe_browser_entries(current_dir, storage):
+                no_match_paths = load_no_match_rom_paths(storage)
+                for entry in describe_browser_entries(current_dir, storage, no_match_paths):
                     print(
                         "\t".join(
                             [
                                 "1" if entry.is_dir else "0",
                                 "1" if entry.is_cached else "0",
+                                "1" if entry.no_achievements else "0",
                                 str(entry.path),
                                 entry.name,
                             ]
@@ -675,7 +680,10 @@ def main() -> None:
             storage = Storage()
             try:
                 known_paths = load_cached_rom_paths(storage)
-                entries = describe_browser_entries_fast(current_dir, known_paths)
+                no_match_paths = load_no_match_rom_paths(storage)
+                entries = describe_browser_entries_fast(
+                    current_dir, known_paths, no_match_paths
+                )
             finally:
                 storage.close()
 
@@ -685,6 +693,7 @@ def main() -> None:
                         [
                             "1" if entry.is_dir else "0",
                             "1" if entry.is_cached else "0",
+                            "1" if entry.no_achievements else "0",
                             str(entry.path),
                             entry.name,
                         ]
@@ -712,7 +721,7 @@ def main() -> None:
             index_by_path = {
                 path: index for index, path in reversed(list(enumerate(rom_paths, start=1)))
             }
-            counts = {"cached": 0, "failed": 0, "queued": 0}
+            counts = {"cached": 0, "failed": 0, "queued": 0, "no_match": 0}
 
             def on_rom_result(rom_path: Path, status: str, message: str) -> None:
                 index = index_by_path[rom_path]
@@ -723,6 +732,9 @@ def main() -> None:
                 elif status == ROM_RESULT_QUEUED:
                     counts["queued"] += 1
                     print(f"QUEUED {index}/{total} {label}", flush=True)
+                elif status == ROM_RESULT_NO_MATCH:
+                    counts["no_match"] += 1
+                    print(f"NOMATCH {index}/{total} {label}", flush=True)
                 else:
                     counts["failed"] += 1
                     print(f"FAIL {index}/{total} {label}: {message}", flush=True)
@@ -747,7 +759,7 @@ def main() -> None:
                 storage.close()
 
             print(
-                f"DONE cached={counts['cached']} failed={counts['failed']} queued={counts['queued']}",
+                f"DONE cached={counts['cached']} failed={counts['failed']} queued={counts['queued']} no_match={counts['no_match']}",
                 flush=True,
             )
             return
@@ -893,6 +905,7 @@ def main() -> None:
                                 "scanned": progress.scanned,
                                 "total": progress.total,
                                 "cached": progress.cached,
+                                "no_match": progress.no_match,
                                 "current_label": progress.current_label,
                             },
                             separators=(",", ":"),
@@ -922,6 +935,7 @@ def main() -> None:
                         "cached": result.cached,
                         "skipped": result.skipped,
                         "queued": result.queued,
+                        "no_match": result.no_match,
                     },
                     separators=(",", ":"),
                 )
@@ -972,6 +986,7 @@ def main() -> None:
                                 "scanned": progress.scanned,
                                 "total": progress.total,
                                 "cached": progress.cached,
+                                "no_match": progress.no_match,
                                 "current_label": progress.current_label,
                             },
                             separators=(",", ":"),
@@ -994,6 +1009,7 @@ def main() -> None:
                             "cached": result.cached,
                             "skipped": result.skipped,
                             "queued": result.queued,
+                            "no_match": result.no_match,
                         },
                         separators=(",", ":"),
                     )
