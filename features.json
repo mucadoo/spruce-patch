@@ -6,12 +6,12 @@
   },
   {
     "id": "bezels",
-    "name": "Handheld bezels",
-    "description": "Frames for Game Boy, Game Boy Color, and GBA. NES, SNES, and Genesis stay full screen, matching Knulli on this 4:3 screen."
+    "name": "Handheld picture",
+    "description": "Game Boy and Game Boy Color at a sharp 3x with a Jeltron frame. GBA fills the screen with sharp-shimmerless and a lighter Perfect frame."
   },
   {
-    "id": "sharp-shader",
-    "name": "Sharp shader",
-    "description": "The sharp-bilinear-simple shader Knulli uses on every system, with bilinear smoothing off."
+    "id": "console-scale",
+    "name": "Console picture",
+    "description": "NES, SNES, and Genesis fill the 640x480 screen with sharp-shimmerless, so the pixels stay even. No frame."
   }
 ]

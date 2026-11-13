@@ -94,12 +94,13 @@ foreach ($feature in $selected) {
 }
 if (-not $found) { throw 'Nothing to install for that choice. Re-download the patch.' }
 
-# RetroArch cfgs are merged, never replaced: keep what is already on the card, and let the
-# patch's own keys win. This also covers a card that already has another piece installed.
+# RetroArch cfgs and core-option files are merged, never replaced: keep what is already
+# on the card, and let the patch's own keys win. This also covers a card that already
+# has another piece installed.
 $files = @()
 foreach ($group in ($found | Group-Object Rel)) {
     $items = @($group.Group)
-    $isCfg = $items[0].Name -like '*.cfg'
+    $isCfg = $items[0].Name -like '*.cfg' -or $items[0].Name -like '*.opt'
     $cardTarget = Join-Path $card $items[0].Rel
     if ($isCfg) {
         $sources = @()

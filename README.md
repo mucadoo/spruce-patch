@@ -16,13 +16,18 @@ The patched spruce files stay under the [spruceOS license](https://creativecommo
 - **RetroAchievements** sits on the main settings list, under that name.
 - Cached achievement images are served again. Stock spruce turned image serving off, which left icons and badges blank.
 
-**Handheld bezels**
+**Handheld picture**
 
-Frames for Game Boy, Game Boy Color, and GBA, using the overlay art already on the spruce card. NES, SNES, and Genesis stay full screen. That matches Knulli's default bezel pack on a 4:3 screen: those consoles were made for a 4:3 TV, so the pack has no frame for them there. Game Boy and GBA do.
+Tuned for the Flip's 3.5-inch 640×480 screen, following [Retro Game Corps' shader and overlay guide](https://retrogamecorps.com/2024/09/01/guide-shaders-and-overlays-on-retro-handhelds/). On a display this size he uses a sharp 3× Game Boy image, and he skips integer scale for GBA because 2× is only about 2.5 inches.
 
-**Sharp shader**
+- Game Boy and Game Boy Color: exact 3× (480×432), bilinear off, shader off, Jeltron frame. Game Boy uses Gambatte's PixelShift 03 palette. Game Boy Color keeps accurate color correction. Interframe blending is Simple.
+- GBA: the picture fills the width (640×427), sharp-shimmerless evens the pixels, and the Perfect frame is the lighter 75% version.
 
-Knulli's default shader, sharp-bilinear-simple, on Game Boy, Game Boy Color, GBA, NES, SNES, and Genesis. Bilinear smoothing is turned off so the shader does the scaling. The shader file is already part of spruce. If you also install handheld bezels, the frames stay.
+The frames and the shader are already on the spruce card. This piece only points at them.
+
+**Console picture**
+
+NES, SNES, and Genesis fill the screen (aspect Full), with bilinear off and sharp-shimmerless so a non-integer scale does not leave uneven pixels. No frame. That is his preferred setup for pixel-era consoles on a 640×480 handheld: the largest image, with the pixels balanced, and without a heavy CRT shader.
 
 ## Install
 
@@ -33,7 +38,7 @@ You need Windows, a spruceOS **4.6.0** card, and the card's volume name set to *
 3. Double-click `install.bat`.
 4. Type the numbers of the pieces you want, or `A` for all of them.
 5. Read the file list and type `y` to confirm.
-6. Eject the card, put it back in the Miyoo, and reboot.
+6. Eject the card, put it back in the Miyoo, and reboot if you installed the RetroAchievements piece. The picture pieces apply the next time a game starts.
 
 The installer copies each current file to a backup folder in your user profile (`spruce-patch-backup-<date>`) before it overwrites anything. To undo, copy those files back onto the card in the same folders.
 
@@ -41,5 +46,5 @@ The installer copies each current file to a backup folder in your user profile (
 
 - `Saves\spruce\spruce-config.json` (your settings and login)
 - `App\RAOfflineProxy\data\` (cache database, logs, and downloaded images)
-- RetroArch core options and button remaps
+- RetroArch button remaps
 - Themes, ROMs, and BIOS files
