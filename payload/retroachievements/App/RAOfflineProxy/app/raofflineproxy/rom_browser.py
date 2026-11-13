@@ -57,7 +57,10 @@ SUPPORTED_ARCHIVE_EXTENSIONS = {".zip", ".7z"}
 # Archives the stdlib can open. A .7z goes through the native hasher instead,
 # which bundles a 7z reader (third_party/lzma-sdk), so it never reaches zipfile.
 ZIP_READABLE_ARCHIVE_EXTENSIONS = {".zip"}
-EXCLUDED_BROWSER_DIR_NAMES = {"Imgs"}
+# Imgs* are box art. A30PORTS and ports hold native games, not RetroAchievements ROMs.
+EXCLUDED_BROWSER_DIR_NAMES = {"imgs", "a30ports", "ports"}
+# spruce drops these empty files in the DS folders so the menu can open the DS launcher.
+BOOT_MENU_FILE_NAMES = {"bootmenu.nds", "bootmenudsi.nds"}
 MAX_SCAN_DEPTH = 12
 PACE_POLL_SECONDS = 1.0
 # RetroAchievements adds hashes over time, so a "no match" is only cached long enough to
@@ -351,7 +354,7 @@ def list_browser_entries(current_dir: Path) -> list[Path]:
         if entry.name.startswith("."):
             continue
         if entry.is_dir():
-            if entry.name in EXCLUDED_BROWSER_DIR_NAMES:
+            if entry.name.lower() in EXCLUDED_BROWSER_DIR_NAMES:
                 continue
             if directory_has_supported_roms(entry):
                 directories.append(entry)
@@ -370,7 +373,7 @@ def list_browser_entries_fast(current_dir: Path) -> list[Path]:
         if entry.name.startswith("."):
             continue
         if entry.is_dir():
-            if entry.name in EXCLUDED_BROWSER_DIR_NAMES:
+            if entry.name.lower() in EXCLUDED_BROWSER_DIR_NAMES:
                 continue
             if directory_has_supported_roms(entry):
                 directories.append(entry)
@@ -432,7 +435,7 @@ def list_scannable_files_recursive(root: Path) -> list[Path]:
             if entry.name.startswith("."):
                 continue
             if entry.is_dir():
-                if entry.name in EXCLUDED_BROWSER_DIR_NAMES or depth >= MAX_SCAN_DEPTH:
+                if entry.name.lower() in EXCLUDED_BROWSER_DIR_NAMES or depth >= MAX_SCAN_DEPTH:
                     continue
                 directories.append(entry)
             elif is_supported_browser_file(entry):
@@ -517,9 +520,13 @@ def directory_has_supported_roms(path: Path) -> bool:
         for entry in path.iterdir():
             if entry.name.startswith("."):
                 continue
+            if entry.is_dir():
+                if entry.name.lower() in EXCLUDED_BROWSER_DIR_NAMES:
+                    continue
+                if directory_has_supported_roms(entry):
+                    return True
+                continue
             if entry.is_file() and is_supported_browser_file(entry):
-                return True
-            if entry.is_dir() and directory_has_supported_roms(entry):
                 return True
     except Exception:
         return False
@@ -528,6 +535,13 @@ def directory_has_supported_roms(path: Path) -> bool:
 
 
 def is_supported_browser_file(path: Path) -> bool:
+    if path.name.lower() in BOOT_MENU_FILE_NAMES:
+        return False
+    try:
+        if path.stat().st_size <= 0:
+            return False
+    except OSError:
+        return False
     suffix = path.suffix.lower()
     if suffix in SUPPORTED_ROM_EXTENSIONS:
         return True
