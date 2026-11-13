@@ -2,6 +2,6 @@
   "label": "Saves",
   "icon": "saves.png",
   "pyuiEntry": "save_manager:run",
-  "description": "See and delete battery saves and savestates",
+  "description": "Browse, delete, and back up your saves",
   "hideInSimpleMode": false
 }

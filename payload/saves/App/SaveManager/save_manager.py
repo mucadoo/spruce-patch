@@ -182,9 +182,7 @@ def _slot_sort(slot):
 def _state_label(slot):
     if slot == "auto":
         return "Auto state"
-    if slot == "0":
-        return "State"
-    return "State " + slot
+    return "State slot " + slot
 
 
 def _size(n):
@@ -195,18 +193,183 @@ def _size(n):
     return "%.1f MB" % (n / (1024 * 1024))
 
 
-def _when(mtime):
-    return time.strftime("%d %b %Y %H:%M", time.localtime(mtime))
+SYSTEM_NAMES = {
+    "ARCADE": "Arcade",
+    "ATARI": "Atari 2600",
+    "CPS1": "CPS1",
+    "CPS2": "CPS2",
+    "CPS3": "CPS3",
+    "DC": "Dreamcast",
+    "FBNEO": "FinalBurn Neo",
+    "FC": "NES",
+    "FDS": "Famicom Disk System",
+    "GB": "Game Boy",
+    "GBA": "Game Boy Advance",
+    "GBC": "Game Boy Color",
+    "GG": "Game Gear",
+    "LYNX": "Atari Lynx",
+    "MAME2003PLUS": "MAME 2003 Plus",
+    "MD": "Mega Drive",
+    "MS": "Master System",
+    "N64": "Nintendo 64",
+    "NDS": "Nintendo DS",
+    "NEOGEO": "Neo Geo",
+    "NGP": "Neo Geo Pocket",
+    "NGPC": "Neo Geo Pocket Color",
+    "PCE": "PC Engine",
+    "PCECD": "PC Engine CD",
+    "PICO8": "PICO-8",
+    "POKE": "Pokemon mini",
+    "PS": "PlayStation",
+    "PSP": "PSP",
+    "SATURN": "Saturn",
+    "SEGACD": "Sega CD",
+    "SFC": "SNES",
+    "SGB": "Super Game Boy",
+    "THIRTYTWOX": "32X",
+    "VB": "Virtual Boy",
+    "WS": "WonderSwan",
+    "WSC": "WonderSwan Color",
+}
+KEEP_STEPS = (0, 1, 3, 5, 10)
+AUTO_STEPS = (0, 15, 30, 60, 360, 1440)
+
+
+class RomIndex:
+    """Finds the console and box art for a save from the ROM it belongs to."""
+
+    def __init__(self, roms="/mnt/SDCARD/Roms", emu="/mnt/SDCARD/Emu"):
+        self.roms = roms
+        self.by_name = {}
+        self.core_systems = {}
+        self.labels = {}
+        self._art = {}
+        for system in _list_dirs(emu):
+            config = _read_json(os.path.join(emu, system, "config.json"))
+            if not isinstance(config, dict):
+                continue
+            label = config.get("label")
+            if isinstance(label, str) and label.strip():
+                self.labels[system] = label.strip()
+            emulator = (config.get("menuOptions") or {}).get("Emulator") or {}
+            for core in emulator.get("options") or []:
+                if isinstance(core, str):
+                    self.core_systems.setdefault(_norm(core), []).append(system)
+        for system in _list_dirs(roms):
+            try:
+                names = os.listdir(os.path.join(roms, system))
+            except OSError:
+                continue
+            for name in names:
+                if name.startswith(".") or "." not in name:
+                    continue
+                base = os.path.splitext(name)[0]
+                self.by_name.setdefault(base.casefold(), []).append(system)
+
+    def system_for(self, core, game):
+        found = self.by_name.get(game.casefold(), [])
+        known = self.core_systems.get(_norm(core), [])
+        for system in found:
+            if system in known:
+                return system
+        if found:
+            return found[0]
+        if len(known) == 1:
+            return known[0]
+        return None
+
+    def label(self, system):
+        return SYSTEM_NAMES.get(system) or self.labels.get(system) or system
+
+    def art(self, system, game):
+        if not system:
+            return None
+        key = (system, game)
+        if key not in self._art:
+            self._art[key] = None
+            for ext in (".qoi", ".png"):
+                path = os.path.join(self.roms, system, "Imgs", game + ext)
+                if os.path.isfile(path):
+                    self._art[key] = path
+                    break
+        return self._art[key]
+
+
+def _list_dirs(path):
+    try:
+        return sorted(name for name in os.listdir(path)
+                      if not name.startswith(".") and os.path.isdir(os.path.join(path, name)))
+    except OSError:
+        return []
+
+
+def _read_json(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return None
+
+
+def _norm(text):
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def clean_title(name):
+    cleaned = re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", name).strip()
+    return cleaned or name
+
+
+def group_by_system(library, roms):
+    """Consoles, each with its games. A game keeps the core folder its files are in."""
+    systems = {}
+    for core in library:
+        for game in core["games"]:
+            system = None if core["name"] == "Other" else roms.system_for(core["name"], game["name"])
+            if system is None and core["name"] == "Other":
+                system = roms.system_for("", game["name"])
+            if system:
+                key, label = system, roms.label(system)
+            elif core["name"] == "Other":
+                key, label = "\0other", "Other"
+            else:
+                key, label = "\0core:" + core["name"], core["name"]
+            entry = systems.setdefault(key, {"key": key, "label": label, "system": system, "games": []})
+            entry["games"].append({
+                "id": (core["name"], game["name"]),
+                "core": core["name"],
+                "name": game["name"],
+                "title": clean_title(game["name"]),
+                "files": game["files"],
+                "mtime": game["mtime"],
+                "art": roms.art(system, game["name"]),
+                "loose": core["name"] == "Other",
+            })
+    for entry in systems.values():
+        titles = {}
+        for game in entry["games"]:
+            titles.setdefault(game["title"].casefold(), []).append(game)
+        for same in titles.values():
+            if len(same) > 1:
+                by_core = len({g["core"] for g in same}) == len(same)
+                for game in same:
+                    tag = "loose file" if game["loose"] else game["core"]
+                    game["title"] = "%s (%s)" % (game["title"], tag) if by_core else game["name"]
+        entry["games"].sort(key=lambda game: game["title"].casefold())
+        entry["mtime"] = max(game["mtime"] for game in entry["games"])
+    return sorted(systems.values(), key=lambda entry: (entry["key"] == "\0other", entry["label"].casefold()))
 
 
 class SaveApp:
     def __init__(self, root):
         self.root = root
         self.library = []
-        self.screen = "cores"
-        self.core_name = None
-        self.game_name = None
+        self.systems = []
+        self.screen = "home"
+        self.system_key = None
+        self.game_id = None
         self.index = {}
+        self.roms = None
 
     def loop(self):
         from controller.controller import Controller
@@ -216,192 +379,214 @@ class SaveApp:
         from views.view_type import ViewType
 
         self._row_type = GridOrListEntry
-        self._views = ViewCreator
-        self._view_type = ViewType
-        self._buttons = Controller
-        self._input = ControllerInput
-        view = None
-        shown = None
+        self.roms = RomIndex()
         while True:
             self.library = scan(self.root)
+            self.systems = group_by_system(self.library, self.roms)
             self._settle()
             key = self._key()
-            if view is None or shown != key:
-                options = self._options()
-                selected_index = self.index.get(key, 0)
-                if selected_index >= len(options):
-                    selected_index = 0
-                view = ViewCreator.create_view(
-                    view_type=ViewType.ICON_AND_DESC,
-                    top_bar_text=self._title(),
-                    options=options,
-                    selected_index=selected_index,
-                    icon_and_desc_use_image_in_place_of_icon=True,
-                )
-                shown = key
-                Controller.clear_last_input()
-            selected = view.get_selection([ControllerInput.A, ControllerInput.B])
-            if selected is None or selected.get_input() is None:
-                continue
+            options = self._options()
+            selected_index = min(self.index.get(key, 0), max(len(options) - 1, 0))
+            view_type = ViewType.ICON_AND_DESC if self.screen == "home" else ViewType.TEXT_AND_IMAGE
+            view = ViewCreator.create_view(
+                view_type=view_type,
+                top_bar_text=self._title(),
+                options=options,
+                selected_index=selected_index,
+            )
+            Controller.clear_last_input()
+            selected = None
+            while selected is None or selected.get_input() is None:
+                selected = view.get_selection([ControllerInput.A, ControllerInput.B])
             if selected.get_input() == ControllerInput.B:
                 if not self._back():
                     return
-                view = None
                 continue
             if selected.get_index() is not None:
                 self.index[key] = selected.get_index()
             choice = selected.get_selection()
             if choice is not None:
                 choice.get_value()()
-            view = None
 
     def _key(self):
-        if self.screen == "games":
-            return "games:" + (self.core_name or "")
-        if self.screen == "files":
-            return "files:" + (self.core_name or "") + "\0" + (self.game_name or "")
-        return "cores"
+        if self.screen == "system":
+            return "system:" + (self.system_key or "")
+        if self.screen == "game":
+            return "game:%s\0%s" % (self.system_key, self.game_id)
+        return "home"
 
     def _settle(self):
-        core, game = self._find()
-        if self.screen == "files" and game is None:
-            self.screen = "games"
-            core, game = self._find()
-        if self.screen == "games" and core is None:
-            self.screen = "cores"
-            self.core_name = None
+        system, game = self._find()
+        if self.screen == "game" and game is None:
+            self.screen = "system"
+        if self.screen == "system" and system is None:
+            self.screen = "home"
+            self.system_key = None
 
     def _find(self):
-        core = None
-        for item in self.library:
-            if item["name"] == self.core_name:
-                core = item
-                break
-        if core is None:
-            return None, None
-        for game in core["games"]:
-            if game["name"] == self.game_name:
-                return core, game
-        return core, None
+        for system in self.systems:
+            if system["key"] != self.system_key:
+                continue
+            for game in system["games"]:
+                if game["id"] == self.game_id:
+                    return system, game
+            return system, None
+        return None, None
 
     def _title(self):
-        if self.screen == "games":
-            return self.core_name or "Saves"
-        if self.screen == "files":
-            return self.game_name or "Saves"
+        system, game = self._find()
+        if self.screen == "game" and game is not None:
+            return game["title"]
+        if self.screen in ("system", "game") and system is not None:
+            return system["label"]
         return "Saves"
 
     def _back(self):
-        if self.screen == "files":
-            self.screen = "games"
-            self.game_name = None
+        if self.screen == "game":
+            self.screen = "system"
             return True
-        if self.screen == "games":
-            self.screen = "cores"
-            self.core_name = None
+        if self.screen == "system":
+            self.screen = "home"
             return True
         return False
 
     def _options(self):
-        if self.screen == "cores":
-            rows = [
-                self._row(
-                    "Backup to Google Drive",
-                    self._backup_description(),
-                    self._backup,
-                ),
-                self._row(
-                    "Backup folders",
-                    "Choose a Drive folder for each platform.",
-                    self._configure_folders,
-                ),
-            ]
-            if not self.library:
-                rows.append(self._row(
-                    "No saves yet",
-                    "Battery saves and savestates show up here.",
-                    lambda: None,
-                ))
-                return rows
-            for core in self.library:
-                count = len(core["games"])
-                noun = "game" if count == 1 else "games"
-                rows.append(self._row(
-                    core["name"],
-                    "%d %s" % (count, noun),
-                    lambda name=core["name"]: self._open_core(name),
-                ))
+        if self.screen == "system":
+            return self._game_rows()
+        if self.screen == "game":
+            return self._file_rows()
+        return self._home_rows()
+
+    def _home_rows(self):
+        from themes.theme import Theme
+
+        config = load_backup_config()
+        rows = [
+            self._row("Back up now", self._backup_status(config), self._backup,
+                      icon=_theme_icon(Theme, "backup") or _app_file("cloud.png")),
+            self._row("Backup settings", self._settings_summary(config), self._settings,
+                      icon=_app_file("settings.png")),
+        ]
+        if not self.systems:
+            rows.append(self._row("No saves yet", "Play a game and save. It shows up here.",
+                                  lambda: None, icon=_app_file("saves.png")))
             return rows
-        core, game = self._find()
-        if self.screen == "games":
-            if core is None:
-                return [self._row("No saves yet", "B goes back.", lambda: None)]
-            rows = []
-            for item in core["games"]:
-                description = _game_summary(item)
-                if core["name"] == "Other":
-                    description += " Outside a core folder."
-                rows.append(self._row(
-                    item["name"],
-                    description,
-                    lambda name=item["name"]: self._open_game(name),
-                ))
-            return rows
-        if game is None:
-            return [self._row("Nothing left here", "B goes back.", lambda: None)]
-        rows = []
-        for item in game["files"]:
+        for system in self.systems:
+            count = len(system["games"])
+            icon = None
+            if system["system"]:
+                icon = _theme_icon(Theme, system["system"].lower(), system=True)
             rows.append(self._row(
-                item["label"],
-                "%s · %s. A deletes it." % (_size(item["size"]), _when(item["mtime"])),
-                lambda item=item: self._delete(item),
-                item.get("image"),
-            ))
-        if len(game["files"]) > 1:
-            rows.append(self._row(
-                "Delete all",
-                "A deletes every save and state for this game.",
-                self._delete_all,
+                system["label"],
+                "%d %s · %s" % (count, "game" if count == 1 else "games", _day(system["mtime"])),
+                lambda key=system["key"]: self._open_system(key),
+                icon=icon or _app_file("saves.png"),
             ))
         return rows
 
-    def _row(self, text, description, action, image=None):
+    def _game_rows(self):
+        system, _game = self._find()
+        rows = []
+        for game in system["games"] if system else []:
+            image = game["art"] or _newest_thumb(game)
+            rows.append(self._row(
+                game["title"],
+                None,
+                lambda game_id=game["id"]: self._open_game(game_id),
+                image=image,
+            ))
+        return rows
+
+    def _file_rows(self):
+        _system, game = self._find()
+        rows = []
+        if game is None:
+            return rows
+        for item in game["files"]:
+            if item["rank"] == 4:
+                continue
+            text = "%s · %s" % (item["label"], _day(item["mtime"]))
+            if item["rank"] != 3:
+                text = "%s · %s · %s" % (item["label"], _size(item["size"]), _day(item["mtime"]))
+            rows.append(self._row(
+                text,
+                None,
+                lambda item=item: self._delete(item),
+                image=item.get("image") or game["art"],
+            ))
+        for item in game["files"]:
+            if item["rank"] == 4:
+                rows.append(self._row(
+                    "Picture without a state · %s" % _day(item["mtime"]),
+                    None,
+                    lambda item=item: self._delete(item),
+                    image=item["path"],
+                ))
+        rows.append(self._row(
+            "Delete everything for this game",
+            None,
+            self._delete_all,
+            image=game["art"] or _newest_thumb(game),
+        ))
+        return rows
+
+    def _row(self, text, description, action, image=None, icon=None, value_text=None):
         return self._row_type(
             primary_text=text,
+            value_text=value_text,
             image_path=image,
             image_path_selected=image,
             description=description,
-            icon=image,
+            icon=icon,
             value=action,
         )
 
-    def _backup_description(self):
-        config = load_backup_config()
-        if _drive_ready():
-            return "Copy saves to %s, unless a platform has its own folder." % config["folder"]
-        return "Link it on this handheld, or with link-gdrive.bat on a PC."
+    def _backup_status(self, config):
+        if not _drive_ready():
+            return "Google Drive is not linked. A links it."
+        last = _last_backup()
+        parts = ["Last backup " + (_ago(last) if last else "never")]
+        if config["autoMinutes"]:
+            parts.append("auto " + _auto_text(config["autoMinutes"]).lower())
+        return " · ".join(parts)
+
+    def _settings_summary(self, config):
+        parts = [
+            config["folder"],
+            "zip" if config["zip"] else "save files",
+            _keep_short(config["keep"]).lower(),
+        ]
+        return " · ".join(parts)
+
+    def _open_system(self, key):
+        self.system_key = key
+        self.screen = "system"
+
+    def _open_game(self, game_id):
+        self.game_id = game_id
+        self.screen = "game"
 
     def _backup(self):
         from controller.controller import Controller
         from display.display import Display
-        from utils.user_prompt import UserPrompt
 
         if not _drive_ready():
             if not self._offer_link() or not _drive_ready():
                 return
-        config = load_backup_config()
-        groups = backup_groups(self.library, config)
-        if not groups:
-            _wait_for_button(["There are no saves to back up."])
+        if not self.library:
+            _wait_for_button(["There are no saves to back up yet."])
             return
-        agreed = UserPrompt.prompt_yes_no("Backup", _confirm_lines(groups, config))
-        Controller.clear_input_queue()
-        if not agreed:
-            return
-        Display.display_message_multiline([
-            "Backing up to Google Drive.",
-            "This can take a minute.",
-        ])
+
+        def progress(number, total, folder):
+            lines = ["Backing up to Google Drive"]
+            if total > 1:
+                lines.append("Folder %d of %d: %s" % (number, total, folder))
+            else:
+                lines.append(folder)
+            lines.append("Keep Wi-Fi on. This can take a minute.")
+            Display.display_message_multiline(lines)
+
+        progress(1, 1, load_backup_config()["folder"])
         held = False
         try:
             Controller.hold_screensaver(True)
@@ -409,13 +594,89 @@ class SaveApp:
         except Exception:
             held = False
         try:
-            _ok, lines = perform_backup(self.root)
+            _ok, lines = perform_backup(self.root, progress)
             _wait_for_button(lines)
         finally:
             if held:
                 Controller.hold_screensaver(False)
 
-    def _configure_folders(self):
+    def _settings(self):
+        from controller.controller import Controller
+        from controller.controller_inputs import ControllerInput
+        from views.view_creator import ViewCreator
+        from views.view_type import ViewType
+
+        inputs = [ControllerInput.A, ControllerInput.DPAD_LEFT, ControllerInput.DPAD_RIGHT]
+        index = 0
+        while True:
+            config = load_backup_config()
+            linked = _drive_ready()
+            own = len(config["platforms"])
+            rows = [
+                self._row("Google Drive", None,
+                          lambda button: self._link_row(button),
+                          value_text="Linked" if linked else "Link now"),
+                self._row("Drive folder", None,
+                          lambda button: button == ControllerInput.A and self._edit_default(),
+                          value_text=config["folder"]),
+                self._row("Platform folders", None,
+                          lambda button: button == ControllerInput.A and self._platform_folders(),
+                          value_text="%d own" % own if own else "All in one"),
+                self._row("Backup as", None,
+                          lambda button: self._toggle("zip"),
+                          value_text=_arrows("Zip" if config["zip"] else "Save files")),
+                self._row("Copies to keep", None,
+                          lambda button: self._step(button, "keep", KEEP_STEPS, self._edit_versions),
+                          value_text=_arrows(_keep_short(config["keep"]))),
+                self._row("Only changed saves", None,
+                          lambda button: self._toggle("skipUnchanged"),
+                          value_text=_arrows("On" if config["skipUnchanged"] else "Off")),
+                self._row("Automatic backup", None,
+                          lambda button: self._step(button, "autoMinutes", AUTO_STEPS, self._edit_auto),
+                          value_text=_arrows(_auto_text(config["autoMinutes"]))),
+            ]
+            view = ViewCreator.create_view(
+                view_type=ViewType.ICON_AND_DESC,
+                top_bar_text="Backup settings",
+                options=rows,
+                selected_index=index,
+            )
+            Controller.clear_last_input()
+            selected = None
+            while selected is None or selected.get_input() is None:
+                selected = view.get_selection(inputs + [ControllerInput.B])
+            if selected.get_input() == ControllerInput.B:
+                return
+            if selected.get_index() is not None:
+                index = selected.get_index()
+            choice = selected.get_selection()
+            if choice is not None:
+                choice.get_value()(selected.get_input())
+
+    def _link_row(self, button):
+        from controller.controller_inputs import ControllerInput
+
+        if button != ControllerInput.A:
+            return
+        if _drive_ready():
+            _wait_for_button(["Google Drive is linked.", "Backups go to the folders set here."])
+            return
+        self._offer_link()
+
+    def _step(self, button, key, steps, chooser):
+        from controller.controller_inputs import ControllerInput
+
+        if button == ControllerInput.A:
+            chooser()
+            return
+        config = load_backup_config()
+        values = sorted(set(steps) | {config[key]})
+        position = values.index(config[key])
+        position += 1 if button == ControllerInput.DPAD_RIGHT else -1
+        config[key] = values[position % len(values)]
+        save_backup_config(config)
+
+    def _platform_folders(self):
         from controller.controller import Controller
         from controller.controller_inputs import ControllerInput
         from views.view_creator import ViewCreator
@@ -424,51 +685,31 @@ class SaveApp:
         index = 0
         while True:
             config = load_backup_config()
-            rows = [
-                self._row(
-                    "Default folder",
-                    config["folder"],
-                    lambda: self._edit_default(),
-                ),
-                self._row(
-                    "Pack as zip",
-                    "Yes" if config["zip"] else "No. Each save is its own file.",
-                    lambda: self._toggle("zip"),
-                ),
-                self._row(
-                    "Versions",
-                    _keep_text(config["keep"]),
-                    lambda: self._edit_versions(),
-                ),
-                self._row(
-                    "Only if a save changed",
-                    "Yes" if config["skipUnchanged"] else "No. The same save is copied again.",
-                    lambda: self._toggle("skipUnchanged"),
-                ),
-                self._row(
-                    "Automatic backup",
-                    _auto_text(config["autoMinutes"]),
-                    lambda: self._edit_auto(),
-                ),
-            ]
-            for core in self.library:
-                name = core["name"]
-                custom = config["platforms"].get(name)
+            names = [core["name"] for core in self.library]
+            for name in config["platforms"]:
+                if name not in names:
+                    names.append(name)
+            if not names:
+                _wait_for_button(["There are no saves yet.", "Platforms show up after the first save."])
+                return
+            rows = []
+            for name in names:
                 rows.append(self._row(
-                    name,
-                    custom if custom else "Uses %s" % config["folder"],
+                    self._core_label(name),
+                    None,
                     lambda name=name: self._edit_platform(name),
+                    value_text=config["platforms"].get(name) or "Drive folder",
                 ))
             view = ViewCreator.create_view(
                 view_type=ViewType.ICON_AND_DESC,
-                top_bar_text="Backup folders",
+                top_bar_text="Platform folders",
                 options=rows,
-                selected_index=index,
+                selected_index=min(index, len(rows) - 1),
             )
             Controller.clear_last_input()
-            selected = view.get_selection([ControllerInput.A, ControllerInput.B])
-            if selected is None or selected.get_input() is None:
-                continue
+            selected = None
+            while selected is None or selected.get_input() is None:
+                selected = view.get_selection([ControllerInput.A, ControllerInput.B])
             if selected.get_input() == ControllerInput.B:
                 return
             if selected.get_index() is not None:
@@ -477,16 +718,28 @@ class SaveApp:
             if choice is not None:
                 choice.get_value()()
 
+    def _core_label(self, core):
+        if core == "Other":
+            return "Other (outside a core folder)"
+        systems = []
+        for system in self.systems:
+            for game in system["games"]:
+                if game["core"] == core and system["system"] and system["label"] not in systems:
+                    systems.append(system["label"])
+        if systems:
+            return "%s (%s)" % (core, ", ".join(systems))
+        return core
+
     def _edit_default(self):
         from display.on_screen_keyboard import OnScreenKeyboard
 
         config = load_backup_config()
-        typed = OnScreenKeyboard().get_input("Default Drive folder", config["folder"])
+        typed = OnScreenKeyboard().get_input("Drive folder", config["folder"])
         if typed is None:
             return
         folder = clean_drive_folder(typed)
         if not folder:
-            _wait_for_button(["Type a folder name.", "Blank is not allowed for the default."])
+            _wait_for_button(["Type a folder name.", "This one cannot be blank."])
             return
         config["folder"] = folder
         save_backup_config(config)
@@ -502,14 +755,14 @@ class SaveApp:
 
         choice = ListOfOptionsSelectionMenu().get_selected_option_index(
             [
-                "Add a new copy every time",
-                "Replace the last copy",
-                "Keep the last 3",
-                "Keep the last 5",
-                "Keep the last 10",
+                "All. Add a new copy every time",
+                "Latest only. Replace the last copy",
+                "Last 3",
+                "Last 5",
+                "Last 10",
                 "Type a number",
             ],
-            "Versions",
+            "Copies to keep",
         )
         if choice is None:
             return
@@ -523,11 +776,11 @@ class SaveApp:
             except ValueError:
                 number = -1
             if number < 0 or number > 50:
-                _wait_for_button(["Type a number from 0 to 50.", "0 adds a copy every time. 1 replaces the last."])
+                _wait_for_button(["Type a number from 0 to 50.", "0 keeps all. 1 keeps the latest only."])
                 return
             config["keep"] = number
         else:
-            config["keep"] = (0, 1, 3, 5, 10)[choice]
+            config["keep"] = KEEP_STEPS[choice]
         save_backup_config(config)
 
     def _edit_auto(self):
@@ -562,7 +815,7 @@ class SaveApp:
                 return
             config["autoMinutes"] = number
         else:
-            config["autoMinutes"] = (0, 15, 30, 60, 360, 1440)[choice]
+            config["autoMinutes"] = AUTO_STEPS[choice]
         save_backup_config(config)
 
     def _edit_platform(self, name):
@@ -589,27 +842,22 @@ class SaveApp:
 
         choice = ListOfOptionsSelectionMenu().get_selected_option_index(
             ["Link on this handheld", "Not now"],
-            "Google Drive",
+            "Link Google Drive",
         )
         if choice != 0:
             return False
         return link_drive.link()
 
-    def _open_core(self, name):
-        self.core_name = name
-        self.screen = "games"
-
-    def _open_game(self, name):
-        self.game_name = name
-        self.screen = "files"
-
     def _delete(self, item):
         from controller.controller import Controller
         from utils.user_prompt import UserPrompt
 
+        _system, game = self._find()
+        title = game["title"] if game else ""
         agreed = UserPrompt.prompt_yes_no("Delete", [
-            item["label"],
-            (self.game_name or "") + "?",
+            "Delete %s" % item["label"].lower(),
+            "of %s?" % title,
+            "This cannot be undone.",
         ])
         Controller.clear_input_queue()
         if not agreed:
@@ -622,12 +870,13 @@ class SaveApp:
         from controller.controller import Controller
         from utils.user_prompt import UserPrompt
 
-        _core, game = self._find()
+        _system, game = self._find()
         if game is None:
             return
-        agreed = UserPrompt.prompt_yes_no("Delete all", [
-            "Delete every save and state for",
-            (self.game_name or "") + "?",
+        agreed = UserPrompt.prompt_yes_no("Delete everything", [
+            "Delete every save and state of",
+            "%s?" % game["title"],
+            "This cannot be undone.",
         ])
         Controller.clear_input_queue()
         if not agreed:
@@ -649,6 +898,86 @@ class SaveApp:
             os.remove(target)
         except OSError:
             Display.display_message("Could not delete that file.", 2000)
+
+
+def _theme_icon(theme, name, system=False):
+    try:
+        path = theme.get_system_icon(name) if system else theme.get_app_icon(name)
+    except Exception:
+        return None
+    return path if path and os.path.isfile(path) else None
+
+
+def _app_file(name):
+    path = os.path.join(_app_dir(), name)
+    return path if os.path.isfile(path) else None
+
+
+def _newest_thumb(game):
+    best = None
+    for item in game["files"]:
+        image = item.get("image")
+        if image and (best is None or item["mtime"] > best[0]):
+            best = (item["mtime"], image)
+    return best[1] if best else None
+
+
+def _arrows(text):
+    return "<  %s  >" % text
+
+
+def _keep_short(keep):
+    try:
+        keep = int(keep)
+    except (TypeError, ValueError):
+        keep = 0
+    if keep <= 0:
+        return "All"
+    if keep == 1:
+        return "Latest only"
+    return "Last %d" % keep
+
+
+def _day(mtime):
+    moment = time.localtime(mtime)
+    today = time.localtime()
+    clock = time.strftime("%H:%M", moment)
+    if moment.tm_year == today.tm_year and moment.tm_yday == today.tm_yday:
+        return "Today " + clock
+    yesterday = time.localtime(time.time() - 86400)
+    if moment.tm_year == yesterday.tm_year and moment.tm_yday == yesterday.tm_yday:
+        return "Yesterday " + clock
+    if moment.tm_year == today.tm_year:
+        return time.strftime("%d %b ", moment).lstrip("0") + clock
+    return time.strftime("%d %b %Y", moment).lstrip("0")
+
+
+def _ago(stamp):
+    seconds = max(0, time.time() - stamp)
+    if seconds < 60:
+        return "just now"
+    if seconds < 3600:
+        return "%d min ago" % (seconds // 60)
+    if seconds < 86400:
+        hours = int(seconds // 3600)
+        return "1 hour ago" if hours == 1 else "%d hours ago" % hours
+    return _day(stamp)
+
+
+def _last_backup():
+    try:
+        with open(os.path.join(_app_dir(), "last-backup.txt"), encoding="utf-8") as handle:
+            return float(handle.read().strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def _mark_backup():
+    try:
+        with open(os.path.join(_app_dir(), "last-backup.txt"), "w", encoding="utf-8") as handle:
+            handle.write("%d\n" % time.time())
+    except OSError:
+        pass
 
 
 def _app_dir():
@@ -742,34 +1071,6 @@ def backup_groups(library, config):
     for folder, names in own.items():
         groups.append((folder, names))
     return groups
-
-
-def _confirm_lines(groups, config):
-    folders = []
-    for folder, _cores in groups:
-        if folder not in folders:
-            folders.append(folder)
-    lines = [
-        "Copy the saves to",
-        ", ".join(folders),
-        "As a zip." if config["zip"] else "As the save files themselves.",
-        _keep_text(config["keep"]) + ".",
-    ]
-    if config["skipUnchanged"]:
-        lines.append("Unchanged saves are skipped.")
-    return lines
-
-
-def _keep_text(keep):
-    try:
-        keep = int(keep)
-    except (TypeError, ValueError):
-        keep = 0
-    if keep <= 0:
-        return "Add a new copy every time"
-    if keep == 1:
-        return "Replace the last copy"
-    return "Keep the last %d" % keep
 
 
 def _archive_label(drive_folder, cores):
@@ -982,7 +1283,7 @@ def _send_files(root, drive_folder, cores, config, stamp, seen, listed):
     return uploaded, skipped, None
 
 
-def perform_backup(root):
+def perform_backup(root, progress=None):
     """Upload saves with the saved settings. Returns (ok, lines)."""
     if not _drive_ready():
         return False, ["Google Drive is not linked yet."]
@@ -1001,7 +1302,9 @@ def perform_backup(root):
         total = 0
         unchanged = 0
         sent = []
-        for drive_folder, cores in groups:
+        for number, (drive_folder, cores) in enumerate(groups, 1):
+            if progress is not None:
+                progress(number, len(groups), drive_folder)
             if config["zip"]:
                 uploaded, skipped, result, dest = _send_zip(
                     root, drive_folder, cores, config, stamp, seen, tmp)
@@ -1017,8 +1320,9 @@ def perform_backup(root):
             total += uploaded
             if uploaded:
                 sent.append(drive_folder)
+        _mark_backup()
         if total == 0:
-            return True, ["No save has changed."]
+            return True, ["Backup is up to date.", "No save has changed since the last one."]
         lines = ["Backed up %d files." % total]
         if unchanged and config["zip"]:
             lines.append("Unchanged folders were left as they are.")
@@ -1077,17 +1381,6 @@ def _wait_for_button(lines):
     Display.display_message_multiline(lines)
     Controller.get_input()
     Controller.clear_input_queue()
-
-
-def _game_summary(game):
-    labels = [item["label"] for item in game["files"] if item["rank"] < 4]
-    if not labels:
-        labels = ["thumbnail"]
-    shown = ", ".join(labels[:3])
-    extra = len(labels) - 3
-    if extra > 0:
-        shown += " +%d" % extra
-    return "%s · %s" % (shown, _when(game["mtime"]))
 
 
 def main(argv):
