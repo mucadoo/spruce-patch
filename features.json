@@ -7,11 +7,11 @@
   {
     "id": "bezels",
     "name": "Handheld picture",
-    "description": "Game Boy and Game Boy Color fill the screen height with sharp-shimmerless and a Perfect frame. GBA fills the width with sharp-shimmerless and a lighter Perfect frame."
+    "description": "Game Boy, Game Boy Color, and GBA on a 640x480 screen, with sharp-shimmerless and a Perfect frame."
   },
   {
     "id": "console-scale",
     "name": "Console picture",
-    "description": "NES, SNES, and Genesis fill the 640x480 screen with sharp-shimmerless, so the pixels stay even. No frame."
+    "description": "NES, SNES, and Genesis fill a 640x480 screen with sharp-shimmerless, so the pixels stay even. No frame. Covers every core those systems offer."
   }
 ]
