@@ -37,6 +37,10 @@ Press A on a save or state to delete it. **Delete everything for this game** rem
 
 **Back up now** is the first row. It shows when the last backup ran, uploads straight away, and shows progress while it runs. **Backup settings** uses the same controls as the spruce settings: left and right change a value, and A opens a list or the keyboard. It sets the Drive folder (`spruce-saves` by default), **Platform folders** to send one core's saves to their own folder, **Backup as** zip or save files, **Copies to keep** (all, latest only, or the last few), **Only changed saves**, and **Automatic backup** (every 15 minutes, 30 minutes, hour, 6 hours, day, or a number of minutes you type). Off means it only runs when you choose it. The timer starts with the menu, waits until Wi-Fi is up and a game is not running, and keeps going after you launch a game. Reboot once after installing so the timer is running. Platform folders are set per core, so Gambatte's Game Boy and Game Boy Color saves share one folder. The handheld has no browser, so there are two ways to link Google Drive. On the handheld, choose **Link on this handheld**, scan the code with your phone, sign in, and type the code from the phone's address bar. Or, on a PC, double-click `link-gdrive.bat`. After either one, backups run when the handheld is on Wi-Fi.
 
+**Games menu**
+
+Nintendo DS and DSi stay off the games menu when the only file in the folder is spruce's boot menu (`BootMenu.nds` or `BootMenuDSi.nds`). That file is there so the DS launcher has something to open. It is not a game, so it does not put the system on the menu. Add a real game and the system shows up. The installer applies this whenever it runs.
+
 ## Install
 
 You need Windows, a spruceOS **4.6.0** card, and the card's volume name set to **SPRUCE** (that is the stock name).
