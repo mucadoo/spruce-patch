@@ -5,6 +5,7 @@ config.json
 proxy.sqlite3
 image_cache/
 *.opt
+!payload/**/*.opt
 *.rmp
 .DS_Store
 Thumbs.db
