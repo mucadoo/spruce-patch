@@ -20,7 +20,7 @@ The patched spruce files stay under the [spruceOS license](https://creativecommo
 
 Tuned for the Flip's 3.5-inch 640×480 screen, following [Retro Game Corps' shader and overlay guide](https://retrogamecorps.com/2024/09/01/guide-shaders-and-overlays-on-retro-handhelds/). On a display this size he uses a sharp 3× Game Boy image, and he skips integer scale for GBA because 2× is only about 2.5 inches.
 
-- Game Boy and Game Boy Color: exact 3× (480×432), bilinear off, shader off, Jeltron frame. Game Boy uses Gambatte's PixelShift 03 palette. Game Boy Color keeps accurate color correction. Interframe blending is Simple.
+- Game Boy and Game Boy Color: the picture fills the screen height at the real 10:9 shape, bilinear off, sharp-shimmerless, Perfect frame in the side bars. Game Boy uses the Perfect DMG palette. Game Boy Color keeps accurate color correction. Interframe blending is Simple.
 - GBA: the picture fills the width (640×427), sharp-shimmerless evens the pixels, and the Perfect frame is the lighter 75% version.
 
 The frames and the shader are already on the spruce card. This piece only points at them.

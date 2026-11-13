@@ -7,7 +7,7 @@
   {
     "id": "bezels",
     "name": "Handheld picture",
-    "description": "Game Boy and Game Boy Color at a sharp 3x with a Jeltron frame. GBA fills the screen with sharp-shimmerless and a lighter Perfect frame."
+    "description": "Game Boy and Game Boy Color fill the screen height with sharp-shimmerless and a Perfect frame. GBA fills the width with sharp-shimmerless and a lighter Perfect frame."
   },
   {
     "id": "console-scale",
