@@ -13,3 +13,6 @@ Thumbs.db
 rclone.conf
 backup.json
 backup-seen.json
+last-backup.txt
+last-auto.txt
+link-qr.png
