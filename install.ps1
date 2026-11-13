@@ -184,6 +184,41 @@ foreach ($f in $files) {
     }
 }
 
+function Hide-BootMenuFromGames([string]$Card) {
+    $roms = Join-Path $Card 'App\PyUI\main-ui\games\utils\rom_utils.py'
+    if (-not (Test-Path -LiteralPath $roms)) { return }
+    $text = [System.IO.File]::ReadAllText($roms)
+    if ($text.Contains('_NOT_A_GAME')) { return }
+    $nl = "`n"
+    if ($text.Contains("`r`n")) { $nl = "`r`n" }
+    $marker = "from pathlib import Path${nl}${nl}class RomUtils:"
+    if (-not $text.Contains($marker)) {
+        Write-Host 'Could not update the games menu. DS may still show when it only has the boot menu.'
+        return
+    }
+    $note = @"
+from pathlib import Path
+
+# spruce leaves these in the DS folders so the launcher has a file to open.
+# They are not games. A system that only has one of them stays off the games menu.
+_NOT_A_GAME = {"bootmenu.nds", "bootmenudsi.nds"}
+
+class RomUtils:
+"@
+    $note = $note -replace "`r`n", $nl
+    $text = $text.Replace($marker, $note.TrimEnd() + $nl)
+    $fileSkip = "                        continue${nl}${nl}                    if len(valid_suffix_set) == 0:"
+    $fileSkipNew = "                        continue${nl}${nl}                    if entry.name.lower() in _NOT_A_GAME:${nl}                        continue${nl}${nl}                    if len(valid_suffix_set) == 0:"
+    $listSkip = "                    if name.startswith('.'):${nl}                        continue${nl}${nl}                    try:"
+    $listSkipNew = "                    if name.startswith('.'):${nl}                        continue${nl}${nl}                    if name.lower() in _NOT_A_GAME:${nl}                        continue${nl}${nl}                    try:"
+    if (-not $text.Contains($fileSkip) -or -not $text.Contains($listSkip)) {
+        Write-Host 'Could not update the games menu. DS may still show when it only has the boot menu.'
+        return
+    }
+    $text = $text.Replace($fileSkip, $fileSkipNew).Replace($listSkip, $listSkipNew)
+    [System.IO.File]::WriteAllText($roms, $text)
+}
+
 function Enable-SaveAutoBackup([string]$Card) {
     $main = Join-Path $Card 'App\PyUI\main-ui\mainui.py'
     if (-not (Test-Path -LiteralPath $main)) { return }
@@ -229,6 +264,7 @@ foreach ($f in $files) {
 if (@($selected | Where-Object { $_.id -eq 'saves' }).Count -gt 0) {
     Enable-SaveAutoBackup $card
 }
+Hide-BootMenuFromGames $card
 
 Write-Host ''
 Write-Host 'Done. Safely eject the SD card, put it back in the handheld, and reboot.' -ForegroundColor Green
