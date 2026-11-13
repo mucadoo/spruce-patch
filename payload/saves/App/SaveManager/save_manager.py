@@ -368,7 +368,7 @@ class SaveApp:
     def _backup_description(self):
         if _drive_ready():
             return "Copy every battery save and savestate."
-        return "Not linked yet. Run link-gdrive.bat on the PC."
+        return "Link it on this handheld, or with link-gdrive.bat on a PC."
 
     def _backup(self):
         from controller.controller import Controller
@@ -376,12 +376,8 @@ class SaveApp:
         from utils.user_prompt import UserPrompt
 
         if not _drive_ready():
-            _wait_for_button([
-                "Google Drive is not linked yet.",
-                "Put the card in the PC and",
-                "run link-gdrive.bat.",
-            ])
-            return
+            if not self._offer_link() or not _drive_ready():
+                return
         agreed = UserPrompt.prompt_yes_no("Backup", [
             "Copy every battery save and",
             "savestate to Google Drive?",
@@ -424,6 +420,18 @@ class SaveApp:
                     pass
             if held:
                 Controller.hold_screensaver(False)
+
+    def _offer_link(self):
+        from menus.settings.list_of_options_selection_menu import ListOfOptionsSelectionMenu
+        import link_drive
+
+        choice = ListOfOptionsSelectionMenu().get_selected_option_index(
+            ["Link on this handheld", "Not now"],
+            "Google Drive",
+        )
+        if choice != 0:
+            return False
+        return link_drive.link()
 
     def _open_core(self, name):
         self.core_name = name
