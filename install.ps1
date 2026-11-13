@@ -123,7 +123,8 @@ function Merge-RetroarchCfg($sources) {
     return $tmp
 }
 
-$skip = @('spruce-config.json', 'config.json', 'proxy.sqlite3')
+$skip = @('spruce-config.json', 'proxy.sqlite3')
+$skipRel = @('App\RAOfflineProxy\data\config.json')
 $found = @()
 foreach ($feature in $selected) {
     $featureDir = Join-Path $payload ([string]$feature.id)
@@ -132,7 +133,7 @@ foreach ($feature in $selected) {
         $rel = $_.FullName.Substring($featureDir.Length).TrimStart('\')
         [pscustomobject]@{ Source = $_.FullName; Rel = $rel; Name = $_.Name; Feature = [string]$feature.name }
     } | Where-Object {
-        $_.Name -notin $skip -and $_.Rel -notmatch '(^|\\)(image_cache|__pycache__)(\\|$)' -and $_.Name -notlike '*.pyc'
+        $_.Name -notin $skip -and $_.Rel -notin $skipRel -and $_.Rel -notmatch '(^|\\)(image_cache|__pycache__)(\\|$)' -and $_.Name -notlike '*.pyc'
     })
 }
 if (-not $found) { throw 'Nothing to install for that choice. Re-download the patch.' }

@@ -1,0 +1,7 @@
+{
+  "label": "Saves",
+  "icon": "saves.png",
+  "pyuiEntry": "save_manager:run",
+  "description": "See and delete battery saves and savestates",
+  "hideInSimpleMode": false
+}

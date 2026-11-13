@@ -29,6 +29,10 @@ The frames and the shader are already on a spruceOS 4.6.0 card. This piece only 
 
 NES, SNES, and Genesis fill the screen (aspect Full), with bilinear off and sharp-shimmerless so a non-integer scale does not leave uneven pixels. No frame. That is his preferred setup for pixel-era consoles on a 640×480 handheld: the largest image, with the pixels balanced, and without a heavy CRT shader.
 
+**Save manager**
+
+**Saves** is in the Apps menu. It lists every battery save and savestate under `Saves`, grouped by the core that wrote it, then by game. A file that is sitting outside a core folder is listed under **Other**. Open a game, then press A to delete one file, or **Delete all** to remove every save and state for that game. Each delete asks first. A state's picture is removed with the state.
+
 ## Install
 
 You need Windows, a spruceOS **4.6.0** card, and the card's volume name set to **SPRUCE** (that is the stock name).
