@@ -20,7 +20,7 @@ The patched spruce files stay under the [spruceOS license](https://creativecommo
 
 Tuned for a 3.5-inch 640×480 screen, following [Retro Game Corps' shader and overlay guide](https://retrogamecorps.com/2024/09/01/guide-shaders-and-overlays-on-retro-handhelds/). On a display this size he skips integer scale for GBA because 2× is only about 2.5 inches.
 
-- Game Boy and Game Boy Color: the picture fills the screen height at the real 10:9 shape, bilinear off, sharp-shimmerless, Perfect frame in the side bars. Game Boy uses the Perfect DMG palette. Game Boy Color keeps accurate color correction. Interframe blending is Simple.
+- Game Boy and Game Boy Color: the picture fills the screen height at the real 10:9 shape, bilinear off, sharp-shimmerless, Perfect frame in the side bars. Game Boy uses the Perfect DMG palette. Game Boy Color keeps accurate color correction, and its frame is at 80% so the grid does not darken the picture. Interframe blending is Simple.
 - GBA: the picture fills the width (640×427), sharp-shimmerless evens the pixels, and the Perfect frame is the lighter 75% version.
 
 The frames and the shader are already on a spruceOS 4.6.0 card. This piece only points at them. It is written for a 640×480 panel: Miyoo Flip, Miyoo A30, Miyoo Mini and Mini Plus, GKD Pixel 2, Anbernic RG28XX, the Anbernic RG XX models with a 640×480 screen, and the other spruce devices that use that same resolution. A different resolution, such as the TrimUI Brick or Smart Pro, is refused by the installer.
