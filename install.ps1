@@ -1,4 +1,4 @@
-# Installs the chosen spruce patch pieces onto a Miyoo SD card.
+# Installs the chosen spruce patch pieces onto a spruceOS SD card.
 # Run via install.bat (double-click) or: powershell -ExecutionPolicy Bypass -File install.ps1
 
 $ErrorActionPreference = 'Stop'
@@ -62,6 +62,49 @@ Write-Host "Found SPRUCE card at $card"
 foreach ($required in @('App\PyUI', 'spruce', 'RetroArch')) {
     if (-not (Test-Path -LiteralPath (Join-Path $card $required))) {
         throw "The card at $card does not look like spruce (missing $required)."
+    }
+}
+
+# The picture pieces use a 640x480 window and the 640x480 overlay pack. A card
+# that has already booted records its device in Saves\ra-configs\retroarch-<device>.cfg.
+function Get-CardScreen($root) {
+    $ra = Join-Path $root 'Saves\ra-configs'
+    if (-not (Test-Path -LiteralPath $ra)) { return $null }
+    $latest = Get-ChildItem -LiteralPath $ra -Filter 'retroarch-*.cfg' -File |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (-not $latest) { return $null }
+    $name = $latest.BaseName.Substring('retroarch-'.Length)
+    $plat = Get-ChildItem -LiteralPath (Join-Path $root 'spruce\scripts\platform') -Recurse -Filter "$name.cfg" -File |
+        Select-Object -First 1
+    $width = $null
+    $height = $null
+    if ($plat) {
+        $text = [System.IO.File]::ReadAllText($plat.FullName)
+        if ($text -match 'DISPLAY_WIDTH="(\d+)"') { $width = $Matches[1] }
+        if ($text -match 'DISPLAY_HEIGHT="(\d+)"') { $height = $Matches[1] }
+    }
+    return [pscustomobject]@{ Name = $name; Width = $width; Height = $height }
+}
+
+$pictureIds = @('bezels', 'console-scale')
+if (@($selected | Where-Object { $pictureIds -contains [string]$_.id }).Count -gt 0) {
+    foreach ($needed in @(
+        'RetroArch\.retroarch\overlay\640x480\Perfect',
+        'RetroArch\.retroarch\shaders\sharpshimmerless\sharp-shimmerless.glslp'
+    )) {
+        if (-not (Test-Path -LiteralPath (Join-Path $card $needed))) {
+            throw "This card is missing $needed. The picture pieces use the overlay pack and shader that spruceOS 4.6.0 already ships."
+        }
+    }
+    $screen = Get-CardScreen $card
+    if ($screen -and $screen.Width -and $screen.Height -and -not ($screen.Width -eq '640' -and $screen.Height -eq '480')) {
+        throw ("This card last booted a $($screen.Name) ($($screen.Width)x$($screen.Height)). " +
+            "The picture pieces are for a 640x480 screen. Install the RetroAchievements piece on its own, or boot the card in a 640x480 device first.")
+    }
+    if ($screen) {
+        Write-Host "Picture pieces: $($screen.Name), $($screen.Width)x$($screen.Height)."
+    } else {
+        Write-Host 'Picture pieces: no device has booted this card yet. They are for a 640x480 screen.'
     }
 }
 
@@ -148,5 +191,5 @@ foreach ($f in $files) {
 }
 
 Write-Host ''
-Write-Host 'Done. Safely eject the SD card, put it back in the Miyoo, and reboot.' -ForegroundColor Green
+Write-Host 'Done. Safely eject the SD card, put it back in the handheld, and reboot.' -ForegroundColor Green
 Write-Host "To undo, copy the files from $backupDir back onto the card."

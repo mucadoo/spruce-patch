@@ -34,13 +34,13 @@ A pass lists ROM files from A to Z. It skips `Imgs`, hidden folders, and anythin
 - Already checked, and RetroAchievements has no set for that ROM: leave it. A game RetroAchievements does not know is **No achievements**. A known game whose dump has no set is **Unsupported version**. A file that cannot be read, such as an empty ROM, is **Could not read**. None of those stay in the "still to cache" count.
 - Anything else: hash it and add it to the queue. The watch does not download the achievement data itself.
 
-Hashing does not need Wi-Fi. Downloading does. The service caches the queue while the Flip is online, idle, and signed in to RetroAchievements. One 30-minute window caches up to 100 games. The first 20 go out together, then the rest are spaced about 18 seconds apart, so RetroAchievements is not hit in one burst. A game with no matching set does not use that budget. An unsupported ROM version is treated as no match and is not listed under Cached Games.
+Hashing does not need Wi-Fi. Downloading does. The service caches the queue while the handheld is online, idle, and signed in to RetroAchievements. One 30-minute window caches up to 100 games. The first 20 go out together, then the rest are spaced about 18 seconds apart, so RetroAchievements is not hit in one burst. A game with no matching set does not use that budget. An unsupported ROM version is treated as no match and is not listed under Cached Games.
 
 A file the watch could not read is skipped on later passes. Turn that watch off and on again if you want those files tried again.
 
 Games you add are not instant. They wait for the next pass, then for a free spot in the 100-game window.
 
-Turning the Flip off does not throw away a background cache. Games already placed in the queue are still there after reboot, and **Background cache** shows them. A game is stored in one step: the patch, the unlocks and the achievement sets land together. If the power cuts while one game is downloading, that game stays in the queue and is not shown as cached. The service continues the queue once the Flip is on, online, and idle.
+Turning the handheld off does not throw away a background cache. Games already placed in the queue are still there after reboot, and **Background cache** shows them. A game is stored in one step: the patch, the unlocks and the achievement sets land together. If the power cuts while one game is downloading, that game stays in the queue and is not shown as cached. The service continues the queue once the handheld is on, online, and idle.
 
 ## While a watch or a cache is running
 

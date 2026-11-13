@@ -1,6 +1,6 @@
 # Agent instructions
 
-This repo holds optional patches for spruceOS 4.6.0 on the Miyoo Flip, plus an installer that copies the chosen pieces onto an SD card.
+This repo holds optional patches for spruceOS 4.6.0, plus an installer that copies the chosen pieces onto an SD card. The RetroAchievements piece runs on any device that card boots. The picture pieces are for a 640×480 screen and the installer refuses them when the card last booted a different resolution.
 
 ## Commits
 
