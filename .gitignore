@@ -11,3 +11,4 @@ image_cache/
 .DS_Store
 Thumbs.db
 rclone.conf
+backup.json
