@@ -2,7 +2,10 @@
 
 import os
 import re
+import subprocess
+import tempfile
 import time
+import zipfile
 
 ROOT = "/mnt/SDCARD/Saves"
 STATE_RE = re.compile(
@@ -298,9 +301,18 @@ class SaveApp:
 
     def _options(self):
         if self.screen == "cores":
+            rows = [self._row(
+                "Backup to Google Drive",
+                self._backup_description(),
+                self._backup,
+            )]
             if not self.library:
-                return [self._row("No saves yet", "Battery saves and savestates show up here.", lambda: None)]
-            rows = []
+                rows.append(self._row(
+                    "No saves yet",
+                    "Battery saves and savestates show up here.",
+                    lambda: None,
+                ))
+                return rows
             for core in self.library:
                 count = len(core["games"])
                 noun = "game" if count == 1 else "games"
@@ -352,6 +364,66 @@ class SaveApp:
             icon=image,
             value=action,
         )
+
+    def _backup_description(self):
+        if _drive_ready():
+            return "Copy every battery save and savestate."
+        return "Not linked yet. Run link-gdrive.bat on the PC."
+
+    def _backup(self):
+        from controller.controller import Controller
+        from display.display import Display
+        from utils.user_prompt import UserPrompt
+
+        if not _drive_ready():
+            _wait_for_button([
+                "Google Drive is not linked yet.",
+                "Put the card in the PC and",
+                "run link-gdrive.bat.",
+            ])
+            return
+        agreed = UserPrompt.prompt_yes_no("Backup", [
+            "Copy every battery save and",
+            "savestate to Google Drive?",
+        ])
+        Controller.clear_input_queue()
+        if not agreed:
+            return
+        Display.display_message_multiline([
+            "Backing up to Google Drive.",
+            "This can take a minute.",
+        ])
+        held = False
+        try:
+            Controller.hold_screensaver(True)
+            held = True
+        except Exception:
+            held = False
+        dest = None
+        try:
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            folder = "/tmp" if os.path.isdir("/tmp") else tempfile.gettempdir()
+            dest = os.path.join(folder, "spruce-saves-%s.zip" % stamp)
+            count = write_backup(self.root, dest)
+            if count == 0:
+                _wait_for_button(["There are no saves to back up."])
+                return
+            result = _upload_backup(dest)
+            if result is None:
+                _wait_for_button([
+                    "Backed up %d files." % count,
+                    "They are in spruce-saves on Google Drive.",
+                ])
+            else:
+                _wait_for_button(["Backup did not finish.", result])
+        finally:
+            if dest and os.path.isfile(dest):
+                try:
+                    os.remove(dest)
+                except OSError:
+                    pass
+            if held:
+                Controller.hold_screensaver(False)
 
     def _open_core(self, name):
         self.core_name = name
@@ -407,6 +479,80 @@ class SaveApp:
             os.remove(target)
         except OSError:
             Display.display_message("Could not delete that file.", 2000)
+
+
+def _app_dir():
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _drive_ready():
+    folder = _app_dir()
+    return os.path.isfile(os.path.join(folder, "rclone")) and os.path.isfile(os.path.join(folder, "rclone.conf"))
+
+
+def write_backup(root, dest):
+    """Zip the battery saves and savestates. Returns how many files were packed."""
+    count = 0
+    with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for folder in ("saves", "states"):
+            base = os.path.join(root, folder)
+            if not os.path.isdir(base):
+                continue
+            for dirpath, dirnames, filenames in os.walk(base):
+                dirnames[:] = [name for name in dirnames if not name.startswith(".")]
+                for filename in filenames:
+                    if filename.startswith("."):
+                        continue
+                    full = os.path.join(dirpath, filename)
+                    rel = os.path.relpath(full, root).replace("\\", "/")
+                    try:
+                        archive.write(full, rel)
+                    except OSError:
+                        continue
+                    count += 1
+    return count
+
+
+def _upload_backup(dest):
+    """Upload one zip. None on success, otherwise a short reason."""
+    folder = _app_dir()
+    binary = os.path.join(folder, "rclone")
+    conf = os.path.join(folder, "rclone.conf")
+    try:
+        os.chmod(binary, 0o755)
+    except OSError:
+        pass
+    remote = "gdrive:spruce-saves/" + os.path.basename(dest)
+    try:
+        proc = subprocess.run(
+            [binary, "copyto", dest, remote, "--config", conf, "--timeout", "5m"],
+            capture_output=True, text=True, timeout=360,
+        )
+    except OSError:
+        return "The uploader could not start."
+    except subprocess.TimeoutExpired:
+        return "Google Drive took too long to answer."
+    if proc.returncode == 0:
+        return None
+    detail = ""
+    for line in (proc.stderr or "").splitlines():
+        line = line.strip()
+        if line:
+            detail = line
+    if not detail:
+        return "Google Drive did not accept the backup."
+    if len(detail) > 90:
+        detail = detail[:90]
+    return detail
+
+
+def _wait_for_button(lines):
+    from controller.controller import Controller
+    from display.display import Display
+
+    Display.display_message_multiline(lines)
+    Controller.get_input()
+    Controller.clear_input_queue()
 
 
 def _game_summary(game):

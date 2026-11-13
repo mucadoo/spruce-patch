@@ -17,6 +17,6 @@
   {
     "id": "saves",
     "name": "Save manager",
-    "description": "An Apps menu entry that lists battery saves and savestates, and deletes the ones you choose."
+    "description": "An Apps menu entry that lists battery saves and savestates, deletes the ones you choose, and backs them up to Google Drive."
   }
 ]
