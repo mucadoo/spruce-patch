@@ -230,6 +230,7 @@ class SaveApp:
                     top_bar_text=self._title(),
                     options=options,
                     selected_index=selected_index,
+                    icon_and_desc_use_image_in_place_of_icon=True,
                 )
                 shown = key
                 Controller.clear_last_input()
@@ -348,6 +349,7 @@ class SaveApp:
             image_path=image,
             image_path_selected=image,
             description=description,
+            icon=image,
             value=action,
         )
 
