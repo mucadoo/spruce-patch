@@ -31,7 +31,11 @@ NES, SNES, and Genesis fill the screen (aspect Full), with bilinear off and shar
 
 **Save manager**
 
-**Saves** is in the Apps menu. It lists every battery save and savestate under `Saves`, grouped by the core that wrote it, then by game. A file that is sitting outside a core folder is listed under **Other**. Open a game, then press A to delete one file, or **Delete all** to remove every save and state for that game. Each delete asks first. A state's picture is removed with the state.
+**Saves** is in the Apps menu. It lists every battery save and savestate under `Saves`, grouped by the core that wrote it, then by game. A savestate's picture shows in place of the icon. A file that is sitting outside a core folder is listed under **Other**.
+
+Open a game and press A to delete the selected save or state. **Delete all** removes every save and state for that game. Each delete asks first, and a state's picture is removed with the state.
+
+**Backup to Google Drive** is the first row. It packs every battery save and savestate and uploads that zip to a `spruce-saves` folder in your Drive. The handheld cannot open Google's sign-in page, so the link is made once on the PC: put the card in the computer and double-click `link-gdrive.bat`. After that, the backup runs from the Saves app when the handheld is on Wi-Fi.
 
 ## Install
 

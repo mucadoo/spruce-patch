@@ -10,3 +10,4 @@ image_cache/
 *.rmp
 .DS_Store
 Thumbs.db
+rclone.conf
