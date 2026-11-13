@@ -35,7 +35,7 @@ NES, SNES, and Genesis fill the screen (aspect Full), with bilinear off and shar
 
 Open a game and press A to delete the selected save or state. **Delete all** removes every save and state for that game. Each delete asks first, and a state's picture is removed with the state.
 
-**Backup to Google Drive** is the first row. It packs every battery save and savestate and uploads that zip to a `spruce-saves` folder in your Drive. The handheld cannot open Google's sign-in page, so the link is made once on the PC: put the card in the computer and double-click `link-gdrive.bat`. After that, the backup runs from the Saves app when the handheld is on Wi-Fi.
+**Backup to Google Drive** is the first row. It packs every battery save and savestate and uploads that zip to a `spruce-saves` folder in your Drive. The handheld has no browser, so there are two ways to link it. On the handheld, choose **Link on this handheld**, scan the code with your phone, sign in, and type the code from the phone's address bar. Or, on a PC, double-click `link-gdrive.bat`. After either one, the backup runs from the Saves app when the handheld is on Wi-Fi.
 
 ## Install
 
