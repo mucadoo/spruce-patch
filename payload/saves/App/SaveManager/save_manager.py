@@ -1,5 +1,6 @@
 """Apps-menu list of battery saves and savestates on the spruce card."""
 
+import json
 import os
 import re
 import subprocess
@@ -8,6 +9,7 @@ import time
 import zipfile
 
 ROOT = "/mnt/SDCARD/Saves"
+DEFAULT_DRIVE_FOLDER = "spruce-saves"
 STATE_RE = re.compile(
     r"^(?P<game>.+)\.state(?P<slot>\.auto|\d+)?(?P<thumb>\.png)?$",
     re.IGNORECASE,
@@ -301,11 +303,18 @@ class SaveApp:
 
     def _options(self):
         if self.screen == "cores":
-            rows = [self._row(
-                "Backup to Google Drive",
-                self._backup_description(),
-                self._backup,
-            )]
+            rows = [
+                self._row(
+                    "Backup to Google Drive",
+                    self._backup_description(),
+                    self._backup,
+                ),
+                self._row(
+                    "Backup folders",
+                    "Choose a Drive folder for each platform.",
+                    self._configure_folders,
+                ),
+            ]
             if not self.library:
                 rows.append(self._row(
                     "No saves yet",
@@ -366,8 +375,9 @@ class SaveApp:
         )
 
     def _backup_description(self):
+        config = load_backup_config()
         if _drive_ready():
-            return "Copy every battery save and savestate."
+            return "Copy saves to %s, unless a platform has its own folder." % config["folder"]
         return "Link it on this handheld, or with link-gdrive.bat on a PC."
 
     def _backup(self):
@@ -378,10 +388,11 @@ class SaveApp:
         if not _drive_ready():
             if not self._offer_link() or not _drive_ready():
                 return
-        agreed = UserPrompt.prompt_yes_no("Backup", [
-            "Copy every battery save and",
-            "savestate to Google Drive?",
-        ])
+        groups = backup_groups(self.library, load_backup_config())
+        if not groups:
+            _wait_for_button(["There are no saves to back up."])
+            return
+        agreed = UserPrompt.prompt_yes_no("Backup", _confirm_lines(groups))
         Controller.clear_input_queue()
         if not agreed:
             return
@@ -395,31 +406,119 @@ class SaveApp:
             held = True
         except Exception:
             held = False
-        dest = None
+        made = []
         try:
             stamp = time.strftime("%Y%m%d-%H%M%S")
-            folder = "/tmp" if os.path.isdir("/tmp") else tempfile.gettempdir()
-            dest = os.path.join(folder, "spruce-saves-%s.zip" % stamp)
-            count = write_backup(self.root, dest)
-            if count == 0:
+            tmp = "/tmp" if os.path.isdir("/tmp") else tempfile.gettempdir()
+            total = 0
+            sent = []
+            failed = None
+            for drive_folder, cores in groups:
+                dest = os.path.join(tmp, _zip_name(drive_folder, cores, stamp))
+                made.append(dest)
+                count = write_backup(self.root, dest, cores)
+                if count == 0:
+                    continue
+                total += count
+                result = _upload_backup(dest, drive_folder)
+                if result is not None:
+                    failed = (drive_folder, result)
+                    break
+                sent.append(drive_folder)
+            if total == 0:
                 _wait_for_button(["There are no saves to back up."])
-                return
-            result = _upload_backup(dest)
-            if result is None:
+            elif failed:
                 _wait_for_button([
-                    "Backed up %d files." % count,
-                    "They are in spruce-saves on Google Drive.",
+                    "Backup did not finish.",
+                    failed[0],
+                    failed[1],
                 ])
             else:
-                _wait_for_button(["Backup did not finish.", result])
+                _wait_for_button([
+                    "Backed up %d files." % total,
+                    "Folders: %s" % ", ".join(sent),
+                ])
         finally:
-            if dest and os.path.isfile(dest):
-                try:
-                    os.remove(dest)
-                except OSError:
-                    pass
+            for dest in made:
+                if os.path.isfile(dest):
+                    try:
+                        os.remove(dest)
+                    except OSError:
+                        pass
             if held:
                 Controller.hold_screensaver(False)
+
+    def _configure_folders(self):
+        from controller.controller import Controller
+        from controller.controller_inputs import ControllerInput
+        from views.view_creator import ViewCreator
+        from views.view_type import ViewType
+
+        index = 0
+        while True:
+            config = load_backup_config()
+            rows = [self._row(
+                "Default folder",
+                config["folder"],
+                lambda: self._edit_default(),
+            )]
+            for core in self.library:
+                name = core["name"]
+                custom = config["platforms"].get(name)
+                rows.append(self._row(
+                    name,
+                    custom if custom else "Uses %s" % config["folder"],
+                    lambda name=name: self._edit_platform(name),
+                ))
+            view = ViewCreator.create_view(
+                view_type=ViewType.ICON_AND_DESC,
+                top_bar_text="Backup folders",
+                options=rows,
+                selected_index=index,
+            )
+            Controller.clear_last_input()
+            selected = view.get_selection([ControllerInput.A, ControllerInput.B])
+            if selected is None or selected.get_input() is None:
+                continue
+            if selected.get_input() == ControllerInput.B:
+                return
+            if selected.get_index() is not None:
+                index = selected.get_index()
+            choice = selected.get_selection()
+            if choice is not None:
+                choice.get_value()()
+
+    def _edit_default(self):
+        from display.on_screen_keyboard import OnScreenKeyboard
+
+        config = load_backup_config()
+        typed = OnScreenKeyboard().get_input("Default Drive folder", config["folder"])
+        if typed is None:
+            return
+        folder = clean_drive_folder(typed)
+        if not folder:
+            _wait_for_button(["Type a folder name.", "Blank is not allowed for the default."])
+            return
+        config["folder"] = folder
+        save_backup_config(config)
+
+    def _edit_platform(self, name):
+        from display.on_screen_keyboard import OnScreenKeyboard
+
+        config = load_backup_config()
+        current = config["platforms"].get(name, "")
+        typed = OnScreenKeyboard().get_input("Folder for " + name, current)
+        if typed is None:
+            return
+        folder = clean_drive_folder(typed)
+        if folder is None:
+            _wait_for_button(["That folder name cannot be used."])
+            return
+        if not folder:
+            config["platforms"].pop(name, None)
+        else:
+            config["platforms"][name] = folder
+        save_backup_config(config)
 
     def _offer_link(self):
         from menus.settings.list_of_options_selection_menu import ListOfOptionsSelectionMenu
@@ -498,8 +597,106 @@ def _drive_ready():
     return os.path.isfile(os.path.join(folder, "rclone")) and os.path.isfile(os.path.join(folder, "rclone.conf"))
 
 
-def write_backup(root, dest):
-    """Zip the battery saves and savestates. Returns how many files were packed."""
+def load_backup_config():
+    path = os.path.join(_app_dir(), "backup.json")
+    config = {"folder": DEFAULT_DRIVE_FOLDER, "platforms": {}}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            found = json.load(handle)
+    except (OSError, ValueError):
+        return config
+    if not isinstance(found, dict):
+        return config
+    folder = clean_drive_folder(found.get("folder") if isinstance(found.get("folder"), str) else "")
+    if folder:
+        config["folder"] = folder
+    platforms = found.get("platforms")
+    if isinstance(platforms, dict):
+        for name, dest in platforms.items():
+            cleaned = clean_drive_folder(dest if isinstance(dest, str) else "")
+            if isinstance(name, str) and cleaned:
+                config["platforms"][name] = cleaned
+    return config
+
+
+def save_backup_config(config):
+    path = os.path.join(_app_dir(), "backup.json")
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        json.dump(config, handle, indent=2)
+        handle.write("\n")
+
+
+def clean_drive_folder(text):
+    """A Drive folder path, '' if blank, or None if the text cannot be used."""
+    text = (text or "").strip().replace("\\", "/").strip("/")
+    if not text:
+        return ""
+    parts = []
+    for part in text.split("/"):
+        part = part.strip()
+        if not part or part in (".", "..") or any(char in part for char in "\n\r\t"):
+            return None
+        parts.append(part)
+    return "/".join(parts)
+
+
+def backup_groups(library, config):
+    """(Drive folder, core names) pairs. Cores without their own folder share the default."""
+    default = config["folder"]
+    rest = []
+    own = {}
+    seen = set()
+    for core in library:
+        name = core["name"]
+        if name in seen:
+            continue
+        seen.add(name)
+        custom = config["platforms"].get(name)
+        if custom and custom != default:
+            own.setdefault(custom, []).append(name)
+        else:
+            rest.append(name)
+    groups = []
+    if rest:
+        groups.append((default, rest))
+    for folder, names in own.items():
+        groups.append((folder, names))
+    return groups
+
+
+def _confirm_lines(groups):
+    folders = []
+    for folder, _cores in groups:
+        if folder not in folders:
+            folders.append(folder)
+    return [
+        "Copy the saves to",
+        ", ".join(folders),
+    ]
+
+
+def _zip_name(drive_folder, cores, stamp):
+    default = load_backup_config()["folder"]
+    if len(cores) == 1 and drive_folder != default:
+        label = cores[0]
+    else:
+        label = "spruce-saves"
+    safe = re.sub(r"[^\w. -]+", "-", label).strip(" .-") or "spruce-saves"
+    return "%s-%s.zip" % (safe, stamp)
+
+
+def _file_core(rel):
+    parts = rel.split("/")
+    if len(parts) >= 3:
+        return parts[1]
+    if len(parts) == 2:
+        return "Other"
+    return ""
+
+
+def write_backup(root, dest, cores=None):
+    """Zip battery saves and savestates. cores limits the zip to those platforms."""
+    wanted = None if cores is None else set(cores)
     count = 0
     with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for folder in ("saves", "states"):
@@ -513,6 +710,8 @@ def write_backup(root, dest):
                         continue
                     full = os.path.join(dirpath, filename)
                     rel = os.path.relpath(full, root).replace("\\", "/")
+                    if wanted is not None and _file_core(rel) not in wanted:
+                        continue
                     try:
                         archive.write(full, rel)
                     except OSError:
@@ -521,7 +720,7 @@ def write_backup(root, dest):
     return count
 
 
-def _upload_backup(dest):
+def _upload_backup(dest, drive_folder):
     """Upload one zip. None on success, otherwise a short reason."""
     folder = _app_dir()
     binary = os.path.join(folder, "rclone")
@@ -530,7 +729,7 @@ def _upload_backup(dest):
         os.chmod(binary, 0o755)
     except OSError:
         pass
-    remote = "gdrive:spruce-saves/" + os.path.basename(dest)
+    remote = "gdrive:" + drive_folder.strip("/") + "/" + os.path.basename(dest)
     try:
         proc = subprocess.run(
             [binary, "copyto", dest, remote, "--config", conf, "--timeout", "5m"],
