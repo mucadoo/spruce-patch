@@ -1,5 +1,6 @@
 """Apps-menu list of battery saves and savestates on the spruce card."""
 
+import hashlib
 import json
 import os
 import re
@@ -388,11 +389,12 @@ class SaveApp:
         if not _drive_ready():
             if not self._offer_link() or not _drive_ready():
                 return
-        groups = backup_groups(self.library, load_backup_config())
+        config = load_backup_config()
+        groups = backup_groups(self.library, config)
         if not groups:
             _wait_for_button(["There are no saves to back up."])
             return
-        agreed = UserPrompt.prompt_yes_no("Backup", _confirm_lines(groups))
+        agreed = UserPrompt.prompt_yes_no("Backup", _confirm_lines(groups, config))
         Controller.clear_input_queue()
         if not agreed:
             return
@@ -410,34 +412,42 @@ class SaveApp:
         try:
             stamp = time.strftime("%Y%m%d-%H%M%S")
             tmp = "/tmp" if os.path.isdir("/tmp") else tempfile.gettempdir()
+            seen = load_seen()
+            listed = {}
             total = 0
+            unchanged = 0
             sent = []
             failed = None
             for drive_folder, cores in groups:
-                dest = os.path.join(tmp, _zip_name(drive_folder, cores, stamp))
-                made.append(dest)
-                count = write_backup(self.root, dest, cores)
-                if count == 0:
-                    continue
-                total += count
-                result = _upload_backup(dest, drive_folder)
+                if config["zip"]:
+                    uploaded, skipped, result, dest = _send_zip(
+                        self.root, drive_folder, cores, config, stamp, seen, tmp)
+                    if dest:
+                        made.append(dest)
+                else:
+                    uploaded, skipped, result = _send_files(
+                        self.root, drive_folder, cores, config, stamp, seen, listed)
+                save_seen(seen)
+                unchanged += skipped
                 if result is not None:
                     failed = (drive_folder, result)
                     break
-                sent.append(drive_folder)
-            if total == 0:
-                _wait_for_button(["There are no saves to back up."])
-            elif failed:
-                _wait_for_button([
-                    "Backup did not finish.",
-                    failed[0],
-                    failed[1],
-                ])
+                total += uploaded
+                if uploaded:
+                    sent.append(drive_folder)
+            if failed:
+                _wait_for_button(["Backup did not finish.", failed[0], failed[1]])
+            elif total == 0:
+                _wait_for_button(["No save has changed."])
             else:
-                _wait_for_button([
-                    "Backed up %d files." % total,
-                    "Folders: %s" % ", ".join(sent),
-                ])
+                lines = ["Backed up %d files." % total]
+                if unchanged and config["zip"]:
+                    lines.append("Unchanged folders were left as they are.")
+                elif unchanged:
+                    lines.append("%d had not changed." % unchanged)
+                if sent:
+                    lines.append("Folders: %s" % ", ".join(sent))
+                _wait_for_button(lines)
         finally:
             for dest in made:
                 if os.path.isfile(dest):
@@ -457,11 +467,28 @@ class SaveApp:
         index = 0
         while True:
             config = load_backup_config()
-            rows = [self._row(
-                "Default folder",
-                config["folder"],
-                lambda: self._edit_default(),
-            )]
+            rows = [
+                self._row(
+                    "Default folder",
+                    config["folder"],
+                    lambda: self._edit_default(),
+                ),
+                self._row(
+                    "Pack as zip",
+                    "Yes" if config["zip"] else "No. Each save is its own file.",
+                    lambda: self._toggle("zip"),
+                ),
+                self._row(
+                    "Versions",
+                    _keep_text(config["keep"]),
+                    lambda: self._edit_versions(),
+                ),
+                self._row(
+                    "Only if a save changed",
+                    "Yes" if config["skipUnchanged"] else "No. The same save is copied again.",
+                    lambda: self._toggle("skipUnchanged"),
+                ),
+            ]
             for core in self.library:
                 name = core["name"]
                 custom = config["platforms"].get(name)
@@ -500,6 +527,45 @@ class SaveApp:
             _wait_for_button(["Type a folder name.", "Blank is not allowed for the default."])
             return
         config["folder"] = folder
+        save_backup_config(config)
+
+    def _toggle(self, key):
+        config = load_backup_config()
+        config[key] = not config[key]
+        save_backup_config(config)
+
+    def _edit_versions(self):
+        from display.on_screen_keyboard import OnScreenKeyboard
+        from menus.settings.list_of_options_selection_menu import ListOfOptionsSelectionMenu
+
+        choice = ListOfOptionsSelectionMenu().get_selected_option_index(
+            [
+                "Add a new copy every time",
+                "Replace the last copy",
+                "Keep the last 3",
+                "Keep the last 5",
+                "Keep the last 10",
+                "Type a number",
+            ],
+            "Versions",
+        )
+        if choice is None:
+            return
+        config = load_backup_config()
+        if choice == 5:
+            typed = OnScreenKeyboard().get_input("How many to keep", str(config["keep"] or ""))
+            if typed is None:
+                return
+            try:
+                number = int(typed.strip())
+            except ValueError:
+                number = -1
+            if number < 0 or number > 50:
+                _wait_for_button(["Type a number from 0 to 50.", "0 adds a copy every time. 1 replaces the last."])
+                return
+            config["keep"] = number
+        else:
+            config["keep"] = (0, 1, 3, 5, 10)[choice]
         save_backup_config(config)
 
     def _edit_platform(self, name):
@@ -599,7 +665,13 @@ def _drive_ready():
 
 def load_backup_config():
     path = os.path.join(_app_dir(), "backup.json")
-    config = {"folder": DEFAULT_DRIVE_FOLDER, "platforms": {}}
+    config = {
+        "folder": DEFAULT_DRIVE_FOLDER,
+        "platforms": {},
+        "zip": True,
+        "keep": 0,
+        "skipUnchanged": True,
+    }
     try:
         with open(path, encoding="utf-8") as handle:
             found = json.load(handle)
@@ -616,6 +688,13 @@ def load_backup_config():
             cleaned = clean_drive_folder(dest if isinstance(dest, str) else "")
             if isinstance(name, str) and cleaned:
                 config["platforms"][name] = cleaned
+    if "zip" in found:
+        config["zip"] = bool(found.get("zip"))
+    keep = found.get("keep", 0)
+    if isinstance(keep, int) and 0 <= keep <= 50:
+        config["keep"] = keep
+    if "skipUnchanged" in found:
+        config["skipUnchanged"] = bool(found.get("skipUnchanged"))
     return config
 
 
@@ -664,25 +743,38 @@ def backup_groups(library, config):
     return groups
 
 
-def _confirm_lines(groups):
+def _confirm_lines(groups, config):
     folders = []
     for folder, _cores in groups:
         if folder not in folders:
             folders.append(folder)
-    return [
+    lines = [
         "Copy the saves to",
         ", ".join(folders),
+        "As a zip." if config["zip"] else "As the save files themselves.",
+        _keep_text(config["keep"]) + ".",
     ]
+    if config["skipUnchanged"]:
+        lines.append("Unchanged saves are skipped.")
+    return lines
 
 
-def _zip_name(drive_folder, cores, stamp):
+def _keep_text(keep):
+    try:
+        keep = int(keep)
+    except (TypeError, ValueError):
+        keep = 0
+    if keep <= 0:
+        return "Add a new copy every time"
+    if keep == 1:
+        return "Replace the last copy"
+    return "Keep the last %d" % keep
+
+
+def _archive_label(drive_folder, cores):
     default = load_backup_config()["folder"]
-    if len(cores) == 1 and drive_folder != default:
-        label = cores[0]
-    else:
-        label = "spruce-saves"
-    safe = re.sub(r"[^\w. -]+", "-", label).strip(" .-") or "spruce-saves"
-    return "%s-%s.zip" % (safe, stamp)
+    label = cores[0] if len(cores) == 1 and drive_folder != default else "spruce-saves"
+    return re.sub(r"[^\w. -]+", "-", label).strip(" .-") or "spruce-saves"
 
 
 def _file_core(rel):
@@ -720,8 +812,62 @@ def write_backup(root, dest, cores=None):
     return count
 
 
-def _upload_backup(dest, drive_folder):
-    """Upload one zip. None on success, otherwise a short reason."""
+def load_seen():
+    path = os.path.join(_app_dir(), "backup-seen.json")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            found = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    return found if isinstance(found, dict) else {}
+
+
+def save_seen(seen):
+    path = os.path.join(_app_dir(), "backup-seen.json")
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        json.dump(seen, handle, indent=2)
+        handle.write("\n")
+
+
+def _md5(path):
+    digest = hashlib.md5()
+    with open(path, "rb") as handle:
+        while True:
+            chunk = handle.read(65536)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _iter_files(root, cores):
+    wanted = set(cores)
+    for folder in ("saves", "states"):
+        base = os.path.join(root, folder)
+        if not os.path.isdir(base):
+            continue
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [name for name in dirnames if not name.startswith(".")]
+            for filename in filenames:
+                if filename.startswith(".") or ".backup-" in filename:
+                    continue
+                full = os.path.join(dirpath, filename)
+                rel = os.path.relpath(full, root).replace("\\", "/")
+                if _file_core(rel) in wanted:
+                    yield full, rel
+
+
+def _group_digest(root, cores):
+    digest = hashlib.md5()
+    for _full, rel in sorted(_iter_files(root, cores), key=lambda item: item[1]):
+        digest.update(rel.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(_md5(_full).encode("ascii"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _rclone(args):
     folder = _app_dir()
     binary = os.path.join(folder, "rclone")
     conf = os.path.join(folder, "rclone.conf")
@@ -729,28 +875,110 @@ def _upload_backup(dest, drive_folder):
         os.chmod(binary, 0o755)
     except OSError:
         pass
-    remote = "gdrive:" + drive_folder.strip("/") + "/" + os.path.basename(dest)
     try:
         proc = subprocess.run(
-            [binary, "copyto", dest, remote, "--config", conf, "--timeout", "5m"],
-            capture_output=True, text=True, timeout=360,
+            [binary, *args, "--config", conf, "--timeout", "2m"],
+            capture_output=True, text=True, timeout=180,
         )
     except OSError:
-        return "The uploader could not start."
+        return 1, "", "The uploader could not start."
     except subprocess.TimeoutExpired:
-        return "Google Drive took too long to answer."
-    if proc.returncode == 0:
-        return None
+        return 1, "", "Google Drive took too long to answer."
     detail = ""
     for line in (proc.stderr or "").splitlines():
-        line = line.strip()
-        if line:
-            detail = line
-    if not detail:
-        return "Google Drive did not accept the backup."
+        if line.strip():
+            detail = line.strip()
     if len(detail) > 90:
         detail = detail[:90]
-    return detail
+    return proc.returncode, proc.stdout or "", detail
+
+
+def _upload_path(local, remote_path):
+    code, _out, detail = _rclone(["copyto", local, "gdrive:" + remote_path.lstrip("/")])
+    if code == 0:
+        return None
+    return detail or "Google Drive did not accept the backup."
+
+
+def _remote_names(parent, listed):
+    if parent in listed:
+        return listed[parent]
+    code, out, _detail = _rclone(["lsf", "gdrive:" + parent, "--files-only"])
+    names = [line.strip() for line in out.splitlines() if line.strip()] if code == 0 else []
+    listed[parent] = names
+    return names
+
+
+def _drop_named(parent, names, matching, keep):
+    extra = matching[:max(0, len(matching) - keep)]
+    for name in extra:
+        _rclone(["deletefile", "gdrive:" + parent + "/" + name])
+        if name in names:
+            names.remove(name)
+
+
+def _send_zip(root, drive_folder, cores, config, stamp, seen, tmp):
+    digest = _group_digest(root, cores)
+    key = "zip\0%s\0%s" % (drive_folder, "\0".join(sorted(cores)))
+    if config["skipUnchanged"] and seen.get(key) == digest:
+        return 0, 1, None, None
+    label = _archive_label(drive_folder, cores)
+    keep = int(config["keep"])
+    name = label + ".zip" if keep == 1 else "%s-%s.zip" % (label, stamp)
+    dest = os.path.join(tmp, name)
+    count = write_backup(root, dest, cores)
+    if count == 0:
+        return 0, 0, None, dest
+    result = _upload_path(dest, drive_folder.strip("/") + "/" + name)
+    if result is not None:
+        return 0, 0, result, dest
+    if keep > 1:
+        names = _remote_names(drive_folder.strip("/"), {})
+        prefix = label + "-"
+        old = sorted(item for item in names if item.startswith(prefix) and item.endswith(".zip"))
+        _drop_named(drive_folder.strip("/"), names, old, keep)
+    seen[key] = digest
+    return count, 0, None, dest
+
+
+def _send_files(root, drive_folder, cores, config, stamp, seen, listed):
+    uploaded = 0
+    skipped = 0
+    keep = int(config["keep"])
+    for full, rel in _iter_files(root, cores):
+        remote = drive_folder.strip("/") + "/" + rel
+        try:
+            digest = _md5(full)
+        except OSError:
+            continue
+        if config["skipUnchanged"] and seen.get(remote) == digest:
+            skipped += 1
+            continue
+        parent, base = remote.rsplit("/", 1)
+        if keep != 1:
+            names = _remote_names(parent, listed)
+            if base in names:
+                history = "%s.backup-%s" % (base, stamp)
+                code, _out, detail = _rclone([
+                    "copyto",
+                    "gdrive:" + remote,
+                    "gdrive:" + parent + "/" + history,
+                ])
+                if code != 0:
+                    return uploaded, skipped, detail or "Could not keep the previous save."
+                names.append(history)
+                if keep > 1:
+                    old = sorted(item for item in names if item.startswith(base + ".backup-"))
+                    _drop_named(parent, names, old, keep - 1)
+        result = _upload_path(full, remote)
+        if result is not None:
+            return uploaded, skipped, result
+        seen[remote] = digest
+        uploaded += 1
+        names = listed.get(parent)
+        if names is not None and base not in names:
+            names.append(base)
+    return uploaded, skipped, None
 
 
 def _wait_for_button(lines):

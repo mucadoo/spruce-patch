@@ -12,3 +12,4 @@ image_cache/
 Thumbs.db
 rclone.conf
 backup.json
+backup-seen.json
