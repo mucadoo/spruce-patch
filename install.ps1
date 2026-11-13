@@ -184,11 +184,50 @@ foreach ($f in $files) {
     }
 }
 
+function Enable-SaveAutoBackup([string]$Card) {
+    $main = Join-Path $Card 'App\PyUI\main-ui\mainui.py'
+    if (-not (Test-Path -LiteralPath $main)) { return }
+    $text = [System.IO.File]::ReadAllText($main)
+    if ($text.Contains('def _start_save_backup(')) { return }
+    $call = "    audio_route_thread.start()"
+    if (-not $text.Contains($call)) { return }
+    $nl = "`n"
+    if ($text.Contains("`r`n")) { $nl = "`r`n" }
+    $text = $text.Replace($call, "$call$nl    _start_save_backup()")
+    $fn = @"
+
+def _start_save_backup():
+    """Start the save backup timer. It keeps running after a game launches."""
+    script = "/mnt/SDCARD/App/SaveManager/auto_backup.sh"
+    if not os.path.isfile(script):
+        return
+    import subprocess
+    try:
+        subprocess.Popen(
+            ["/bin/sh", script],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError:
+        pass
+
+"@
+    $fn = $fn -replace "`r`n", $nl
+    $text = $text.Replace("def start_background_threads():", "$fn" + "def start_background_threads():")
+    [System.IO.File]::WriteAllText($main, $text)
+}
+
 Write-Step 'Copying files...'
 foreach ($f in $files) {
     $target = Join-Path $card $f.Rel
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
     Copy-Item -LiteralPath $f.Source -Destination $target -Force
+}
+
+if (@($selected | Where-Object { $_.id -eq 'saves' }).Count -gt 0) {
+    Enable-SaveAutoBackup $card
 }
 
 Write-Host ''

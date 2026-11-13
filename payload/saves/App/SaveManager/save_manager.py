@@ -408,53 +408,10 @@ class SaveApp:
             held = True
         except Exception:
             held = False
-        made = []
         try:
-            stamp = time.strftime("%Y%m%d-%H%M%S")
-            tmp = "/tmp" if os.path.isdir("/tmp") else tempfile.gettempdir()
-            seen = load_seen()
-            listed = {}
-            total = 0
-            unchanged = 0
-            sent = []
-            failed = None
-            for drive_folder, cores in groups:
-                if config["zip"]:
-                    uploaded, skipped, result, dest = _send_zip(
-                        self.root, drive_folder, cores, config, stamp, seen, tmp)
-                    if dest:
-                        made.append(dest)
-                else:
-                    uploaded, skipped, result = _send_files(
-                        self.root, drive_folder, cores, config, stamp, seen, listed)
-                save_seen(seen)
-                unchanged += skipped
-                if result is not None:
-                    failed = (drive_folder, result)
-                    break
-                total += uploaded
-                if uploaded:
-                    sent.append(drive_folder)
-            if failed:
-                _wait_for_button(["Backup did not finish.", failed[0], failed[1]])
-            elif total == 0:
-                _wait_for_button(["No save has changed."])
-            else:
-                lines = ["Backed up %d files." % total]
-                if unchanged and config["zip"]:
-                    lines.append("Unchanged folders were left as they are.")
-                elif unchanged:
-                    lines.append("%d had not changed." % unchanged)
-                if sent:
-                    lines.append("Folders: %s" % ", ".join(sent))
-                _wait_for_button(lines)
+            _ok, lines = perform_backup(self.root)
+            _wait_for_button(lines)
         finally:
-            for dest in made:
-                if os.path.isfile(dest):
-                    try:
-                        os.remove(dest)
-                    except OSError:
-                        pass
             if held:
                 Controller.hold_screensaver(False)
 
@@ -487,6 +444,11 @@ class SaveApp:
                     "Only if a save changed",
                     "Yes" if config["skipUnchanged"] else "No. The same save is copied again.",
                     lambda: self._toggle("skipUnchanged"),
+                ),
+                self._row(
+                    "Automatic backup",
+                    _auto_text(config["autoMinutes"]),
+                    lambda: self._edit_auto(),
                 ),
             ]
             for core in self.library:
@@ -566,6 +528,41 @@ class SaveApp:
             config["keep"] = number
         else:
             config["keep"] = (0, 1, 3, 5, 10)[choice]
+        save_backup_config(config)
+
+    def _edit_auto(self):
+        from display.on_screen_keyboard import OnScreenKeyboard
+        from menus.settings.list_of_options_selection_menu import ListOfOptionsSelectionMenu
+
+        choice = ListOfOptionsSelectionMenu().get_selected_option_index(
+            [
+                "Off",
+                "Every 15 minutes",
+                "Every 30 minutes",
+                "Every hour",
+                "Every 6 hours",
+                "Every day",
+                "Type minutes",
+            ],
+            "Automatic backup",
+        )
+        if choice is None:
+            return
+        config = load_backup_config()
+        if choice == 6:
+            typed = OnScreenKeyboard().get_input("Minutes between backups", str(config["autoMinutes"] or ""))
+            if typed is None:
+                return
+            try:
+                number = int(typed.strip())
+            except ValueError:
+                number = -1
+            if number < 0 or number > 10080:
+                _wait_for_button(["Type a number from 0 to 10080.", "0 turns automatic backup off."])
+                return
+            config["autoMinutes"] = number
+        else:
+            config["autoMinutes"] = (0, 15, 30, 60, 360, 1440)[choice]
         save_backup_config(config)
 
     def _edit_platform(self, name):
@@ -671,6 +668,7 @@ def load_backup_config():
         "zip": True,
         "keep": 0,
         "skipUnchanged": True,
+        "autoMinutes": 0,
     }
     try:
         with open(path, encoding="utf-8") as handle:
@@ -695,6 +693,9 @@ def load_backup_config():
         config["keep"] = keep
     if "skipUnchanged" in found:
         config["skipUnchanged"] = bool(found.get("skipUnchanged"))
+    minutes = found.get("autoMinutes", 0)
+    if isinstance(minutes, int) and 0 <= minutes <= 10080:
+        config["autoMinutes"] = minutes
     return config
 
 
@@ -981,6 +982,94 @@ def _send_files(root, drive_folder, cores, config, stamp, seen, listed):
     return uploaded, skipped, None
 
 
+def perform_backup(root):
+    """Upload saves with the saved settings. Returns (ok, lines)."""
+    if not _drive_ready():
+        return False, ["Google Drive is not linked yet."]
+    if not _acquire_lock():
+        return False, ["A backup is already running."]
+    made = []
+    try:
+        config = load_backup_config()
+        groups = backup_groups(scan(root), config)
+        if not groups:
+            return True, ["There are no saves to back up."]
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        tmp = "/tmp" if os.path.isdir("/tmp") else tempfile.gettempdir()
+        seen = load_seen()
+        listed = {}
+        total = 0
+        unchanged = 0
+        sent = []
+        for drive_folder, cores in groups:
+            if config["zip"]:
+                uploaded, skipped, result, dest = _send_zip(
+                    root, drive_folder, cores, config, stamp, seen, tmp)
+                if dest:
+                    made.append(dest)
+            else:
+                uploaded, skipped, result = _send_files(
+                    root, drive_folder, cores, config, stamp, seen, listed)
+            save_seen(seen)
+            unchanged += skipped
+            if result is not None:
+                return False, ["Backup did not finish.", drive_folder, result]
+            total += uploaded
+            if uploaded:
+                sent.append(drive_folder)
+        if total == 0:
+            return True, ["No save has changed."]
+        lines = ["Backed up %d files." % total]
+        if unchanged and config["zip"]:
+            lines.append("Unchanged folders were left as they are.")
+        elif unchanged:
+            lines.append("%d had not changed." % unchanged)
+        if sent:
+            lines.append("Folders: %s" % ", ".join(sent))
+        return True, lines
+    finally:
+        for dest in made:
+            if dest and os.path.isfile(dest):
+                try:
+                    os.remove(dest)
+                except OSError:
+                    pass
+        _release_lock()
+
+
+def _acquire_lock():
+    if not os.path.isdir("/tmp"):
+        return True
+    try:
+        os.mkdir("/tmp/save-backup.lock")
+        return True
+    except OSError:
+        return False
+
+
+def _release_lock():
+    try:
+        os.rmdir("/tmp/save-backup.lock")
+    except OSError:
+        pass
+
+
+def _auto_text(minutes):
+    try:
+        minutes = int(minutes)
+    except (TypeError, ValueError):
+        minutes = 0
+    if minutes <= 0:
+        return "Off"
+    if minutes % 1440 == 0:
+        days = minutes // 1440
+        return "Every day" if days == 1 else "Every %d days" % days
+    if minutes % 60 == 0:
+        hours = minutes // 60
+        return "Every hour" if hours == 1 else "Every %d hours" % hours
+    return "Every %d minutes" % minutes
+
+
 def _wait_for_button(lines):
     from controller.controller import Controller
     from display.display import Display
@@ -999,3 +1088,21 @@ def _game_summary(game):
     if extra > 0:
         shown += " +%d" % extra
     return "%s · %s" % (shown, _when(game["mtime"]))
+
+
+def main(argv):
+    if "--minutes" in argv:
+        print(load_backup_config()["autoMinutes"])
+        return 0
+    if "--backup" in argv:
+        ok, lines = perform_backup(ROOT)
+        for line in lines:
+            print(line)
+        return 0 if ok else 1
+    run()
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    raise SystemExit(main(sys.argv))
