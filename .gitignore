@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 spruce-config.json
 config.json
+!payload/**/config.json
 proxy.sqlite3
 image_cache/
 *.opt

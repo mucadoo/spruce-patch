@@ -13,5 +13,10 @@
     "id": "console-scale",
     "name": "Console picture",
     "description": "NES, SNES, and Genesis fill a 640x480 screen with sharp-shimmerless, so the pixels stay even. No frame. Covers every core those systems offer."
+  },
+  {
+    "id": "saves",
+    "name": "Save manager",
+    "description": "An Apps menu entry that lists battery saves and savestates, and deletes the ones you choose."
   }
 ]
