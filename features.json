@@ -23,5 +23,10 @@
     "id": "saves",
     "name": "Save manager",
     "description": "An Apps menu entry that lists battery saves and savestates, deletes the ones you choose, and backs them up to Google Drive, including on a timer."
+  },
+  {
+    "id": "hotkeys",
+    "name": "Hotkey list",
+    "description": "Adds a Hotkeys row to Settings that lists the button chords this device is using."
   }
 ]

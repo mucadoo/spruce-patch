@@ -251,6 +251,46 @@ class RomUtils:
     [System.IO.File]::WriteAllText($roms, $text)
 }
 
+function Add-HotkeysMenu([string]$Card) {
+    $menu = Join-Path $Card 'App\PyUI\main-ui\menus\settings\basic_settings_menu.py'
+    if (-not (Test-Path -LiteralPath $menu)) { return }
+    $text = [System.IO.File]::ReadAllText($menu)
+    if ($text.Contains('HotkeysMenu')) { return }
+    $nl = "`n"
+    if ($text.Contains("`r`n")) { $nl = "`r`n" }
+    $import = "from menus.settings.about_menu import AboutMenu"
+    if (-not $text.Contains($import)) {
+        Write-Host 'Could not add the Hotkeys row. The settings menu layout was not recognised.'
+        return
+    }
+    $text = $text.Replace($import, "from menus.settings.about_menu import AboutMenu${nl}from menus.settings.hotkeys_menu import HotkeysMenu")
+    $method = "    def launch_about(self,input):"
+    $methodNew = "    def launch_hotkeys(self,input):${nl}        if(ControllerInput.A == input):${nl}            HotkeysMenu().show_menu()${nl}${nl}    def launch_about(self,input):"
+    $entry = 'primary_text=Language.aboutThisDevice(),'
+    $entryNew = @"
+primary_text="Hotkeys",
+                            value_text=None,
+                            image_path=None,
+                            image_path_selected=None,
+                            description=None,
+                            icon=None,
+                            value=self.launch_hotkeys
+                        )
+                )
+
+            option_list.append(
+                    GridOrListEntry(
+                            primary_text=Language.aboutThisDevice(),
+"@
+    $entryNew = $entryNew -replace "`r`n", $nl
+    if (-not $text.Contains($method) -or -not $text.Contains($entry)) {
+        Write-Host 'Could not add the Hotkeys row. The settings menu layout was not recognised.'
+        return
+    }
+    $text = $text.Replace($method, $methodNew).Replace($entry, $entryNew.TrimEnd())
+    [System.IO.File]::WriteAllText($menu, $text)
+}
+
 function Enable-SaveAutoBackup([string]$Card) {
     $main = Join-Path $Card 'App\PyUI\main-ui\mainui.py'
     if (-not (Test-Path -LiteralPath $main)) { return }
@@ -295,6 +335,9 @@ foreach ($f in $files) {
 
 if (@($selected | Where-Object { $_.id -eq 'saves' }).Count -gt 0) {
     Enable-SaveAutoBackup $card
+}
+if (@($selected | Where-Object { $_.id -eq 'hotkeys' }).Count -gt 0) {
+    Add-HotkeysMenu $card
 }
 Hide-BootMenuFromGames $card
 

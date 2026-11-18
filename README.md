@@ -53,6 +53,10 @@ Press A on a save or state to delete it. **Delete everything for this game** rem
 
 Nintendo DS and DSi stay off the games menu when the only file in the folder is spruce's boot menu (`BootMenu.nds` or `BootMenuDSi.nds`). That file is there so the DS launcher has something to open. It is not a game, so it does not put the system on the menu. Add a real game and the system shows up. The installer applies this whenever it runs.
 
+**Hotkey list**
+
+**Hotkeys** is a row in Settings, above About. It lists the chords spruce is using on this device: brightness, screenshot, volume, sleep, and shut down, then what a tap and a hold of Menu do, then the RetroArch chords. The RetroArch ones use whichever button you picked for the hotkey (Select, Start, or Menu). If that setting is Custom, they are shown as Hotkey plus the other button. Changing a chord in Button Settings and opening Hotkeys again shows the new one. Nothing on this screen changes a setting.
+
 ## Install
 
 You need Windows, a spruceOS **4.6.0** card, and the card's volume name set to **SPRUCE** (that is the stock name).
