@@ -36,7 +36,7 @@ Stays on LudicrousN64, the fast core spruce already uses, so RetroAchievements s
 
 Two games cannot live with that:
 
-- **Paper Mario** turns the overclock off and copies the color buffer. The opening freezes on the letter when the CPU runs ahead of the picture, or when the game waits on a frame that was never copied back.
+- **Paper Mario** uses the slower cached interpreter instead of the dynamic recompiler, because the opening freezes on the letter scene with the recompiler. It also copies the color buffer, and the core's own Paper Mario profile is ignored.
 - **Donkey Kong 64** does the same, and also copies the depth buffer. Without that the picture breaks up. Its stick deadzone is wider, so a resting stick does not swing the camera.
 
 Every other N64 game is unchanged.
