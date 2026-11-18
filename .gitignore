@@ -8,6 +8,7 @@ image_cache/
 *.opt
 !payload/**/*.opt
 *.rmp
+!payload/**/*.rmp
 .DS_Store
 Thumbs.db
 rclone.conf

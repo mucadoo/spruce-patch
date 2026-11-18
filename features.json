@@ -20,6 +20,11 @@
     "description": "Keeps LudicrousN64 fast for RetroAchievements, and gives Paper Mario and Donkey Kong 64 settings that stop their glitches and freezes."
   },
   {
+    "id": "n64-dpad-stick",
+    "name": "N64 D-pad as stick",
+    "description": "Adds a Stick row to the N64 menu. Left stick and D-pad makes the D-pad drive the N64 stick too. Left stick puts the D-pad back. The left stick stays mapped either way."
+  },
+  {
     "id": "saves",
     "name": "Save manager",
     "description": "An Apps menu entry that lists battery saves and savestates, deletes the ones you choose, and backs them up to Google Drive, including on a timer."

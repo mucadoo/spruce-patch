@@ -1,0 +1,11 @@
+{
+  "menuOptions": {
+    "stickInput": {
+      "display": "Stick",
+      "devices": ["MIYOO_FLIP"],
+      "options": ["Left stick and D-pad", "Left stick"],
+      "selected": "Left stick and D-pad",
+      "overrides": {}
+    }
+  }
+}

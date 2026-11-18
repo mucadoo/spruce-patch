@@ -41,6 +41,15 @@ Two games cannot live with that:
 
 Every other N64 game is unchanged.
 
+**N64 D-pad as stick**
+
+On every N64 core (LudicrousN64, Mupen64Plus-Next, Mupen64Plus GLES2, ParaLLEl N64, and ParaLLEl N64 Xtreme Amped), the left stick drives the N64 stick. **Stick** in the N64 configuration (press X on a game) chooses whether the D-pad does too.
+
+- **Left stick and D-pad** is the default. Up, down, left, and right on the D-pad move the stick, and the left stick keeps doing it. The D-pad still works as a D-pad, so RetroArch's menu still responds to it.
+- **Left stick** takes the D-pad off the stick. The left stick is unchanged.
+
+The change applies the next time a game launches. Left or right on the row sets it for every N64 game. A on the row can set it for one game. Spruce copies its own controller layout onto some cores at launch, so this runs after that copy.
+
 **Save manager**
 
 **Saves** is in the Apps menu. The home screen lists each console that has saves, with the theme's console icon, the number of games, and the time of the newest save. The console comes from the matching ROM, so Game Boy and Game Boy Color games are listed apart even though Gambatte saves both in one folder. Open a console to see its games with their box art, and open a game to see its battery save, its savestates with their pictures, and the time each was written. A file sitting outside a core folder is marked as a loose file.

@@ -159,13 +159,13 @@ foreach ($feature in $selected) {
 }
 if (-not $found) { throw 'Nothing to install for that choice. Re-download the patch.' }
 
-# RetroArch cfgs and core-option files are merged, never replaced: keep what is already
+# RetroArch cfgs, core options and remaps are merged, never replaced: keep what is already
 # on the card, and let the patch's own keys win. This also covers a card that already
 # has another piece installed.
 $files = @()
 foreach ($group in ($found | Group-Object Rel)) {
     $items = @($group.Group)
-    $isCfg = $items[0].Name -like '*.cfg' -or $items[0].Name -like '*.opt'
+    $isCfg = $items[0].Name -like '*.cfg' -or $items[0].Name -like '*.opt' -or $items[0].Name -like '*.rmp'
     $cardTarget = Join-Path $card $items[0].Rel
     if ($isCfg) {
         $sources = @()
@@ -182,8 +182,10 @@ foreach ($group in ($found | Group-Object Rel)) {
             Write-Host "Skipped $($items[0].Rel): the card has no N64 menu config to merge into."
             continue
         }
+        $merged = $cardTarget
+        foreach ($item in $items) { $merged = Merge-JsonOverrides $merged $item.Source }
         $files += [pscustomobject]@{
-            Source  = Merge-JsonOverrides $cardTarget $items[0].Source
+            Source  = $merged
             Rel     = $items[0].Rel
             Name    = $items[0].Name
             Feature = ($items.Feature -join ' + ')
@@ -291,6 +293,22 @@ primary_text="Hotkeys",
     [System.IO.File]::WriteAllText($menu, $text)
 }
 
+function Enable-N64StickMenu([string]$Card) {
+    $launchPath = Join-Path $Card 'spruce\scripts\emu\standard_launch.sh'
+    if (-not (Test-Path -LiteralPath $launchPath)) { return }
+    $text = [System.IO.File]::ReadAllText($launchPath)
+    if ($text.Contains('n64_stick_input.sh')) { return }
+    $nl = "`n"
+    if ($text.Contains("`r`n")) { $nl = "`r`n" }
+    $old = "load_n64_controller_profile${nl}			run_retroarch"
+    $new = "load_n64_controller_profile${nl}			[ -f /mnt/SDCARD/spruce/scripts/emu/lib/n64_stick_input.sh ] && . /mnt/SDCARD/spruce/scripts/emu/lib/n64_stick_input.sh && apply_n64_stick_input${nl}			run_retroarch"
+    if (-not $text.Contains($old)) {
+        Write-Host 'Could not add the N64 stick option to the launch script. Its layout was not recognised.'
+        return
+    }
+    [System.IO.File]::WriteAllText($launchPath, $text.Replace($old, $new))
+}
+
 function Move-DisplaySettingsToRoot([string]$Card) {
     $basicPath = Join-Path $Card 'App\PyUI\main-ui\menus\settings\basic_settings_menu.py'
     $extraPath = Join-Path $Card 'App\PyUI\main-ui\menus\settings\extra_settings_menu.py'
@@ -392,6 +410,9 @@ if (@($selected | Where-Object { $_.id -eq 'hotkeys' }).Count -gt 0) {
 }
 if (@($selected | Where-Object { $_.id -eq 'display' }).Count -gt 0) {
     Move-DisplaySettingsToRoot $card
+}
+if (@($selected | Where-Object { $_.id -eq 'n64-dpad-stick' }).Count -gt 0) {
+    Enable-N64StickMenu $card
 }
 Hide-BootMenuFromGames $card
 
