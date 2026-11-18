@@ -53,6 +53,13 @@ Press A on a save or state to delete it. **Delete everything for this game** rem
 
 Nintendo DS and DSi stay off the games menu when the only file in the folder is spruce's boot menu (`BootMenu.nds` or `BootMenuDSi.nds`). That file is there so the DS launcher has something to open. It is not a game, so it does not put the system on the menu. Add a real game and the system shows up. The installer applies this whenever it runs.
 
+**Display presets**
+
+**Display settings** is a row in the top Settings menu, above Additional settings. It starts with two presets. Press A on one to apply it. The sliders underneath update to match.
+
+- **Default** puts the picture back to the stock Flip values: backlight 10, brightness 7, contrast 10, saturation 14, hue 10.
+- **Dimmest** sets the backlight to its lowest step that still lights the panel, brightness to 8, and contrast to 2. Saturation and hue stay where they are. The lamp cannot go lower than that step without switching off.
+
 **Hotkey list**
 
 **Hotkeys** is a row in Settings, above About. It lists the chords spruce is using on this device: brightness, screenshot, volume, sleep, and shut down, then what a tap and a hold of Menu do, then the RetroArch chords. The RetroArch ones use whichever button you picked for the hotkey (Select, Start, or Menu). If that setting is Custom, they are shown as Hotkey plus the other button. Changing a chord in Button Settings and opening Hotkeys again shows the new one. Nothing on this screen changes a setting.

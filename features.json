@@ -28,5 +28,10 @@
     "id": "hotkeys",
     "name": "Hotkey list",
     "description": "Adds a Hotkeys row to Settings that lists the button chords this device is using."
+  },
+  {
+    "id": "display",
+    "name": "Display presets",
+    "description": "Moves Display settings to the top Settings menu, and adds Default and Dimmest presets. Default restores the stock picture. Dimmest uses the lowest lit backlight, brightness 8, and contrast 2."
   }
 ]

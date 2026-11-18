@@ -291,6 +291,57 @@ primary_text="Hotkeys",
     [System.IO.File]::WriteAllText($menu, $text)
 }
 
+function Move-DisplaySettingsToRoot([string]$Card) {
+    $basicPath = Join-Path $Card 'App\PyUI\main-ui\menus\settings\basic_settings_menu.py'
+    $extraPath = Join-Path $Card 'App\PyUI\main-ui\menus\settings\extra_settings_menu.py'
+    if (-not (Test-Path -LiteralPath $basicPath) -or -not (Test-Path -LiteralPath $extraPath)) { return }
+    $basic = [System.IO.File]::ReadAllText($basicPath)
+    $extra = [System.IO.File]::ReadAllText($extraPath)
+    $nl = "`n"
+    if ($basic.Contains("`r`n")) { $nl = "`r`n" }
+
+    if (-not $basic.Contains('DisplaySettingsMenu')) {
+        $import = 'from menus.settings.about_menu import AboutMenu'
+        $method = '    def launch_about(self,input):'
+        $ret    = '        return option_list'
+        $retCount = ([regex]::Matches($basic, [regex]::Escape($ret))).Count
+        if (-not $basic.Contains($import) -or -not $basic.Contains($method) -or $retCount -ne 1) {
+            Write-Host 'Could not move Display settings to the main Settings menu. The settings menu layout was not recognised.'
+            return
+        }
+        $basic = $basic.Replace($import, $import + $nl + 'from menus.settings.display_settings_menu import DisplaySettingsMenu')
+        $basic = $basic.Replace($method, '    def launch_display(self,input):' + $nl +
+            '        if(ControllerInput.A == input):' + $nl +
+            '            DisplaySettingsMenu().show_menu()' + $nl + $nl + $method)
+        $add = @"
+        display_at = next((i for i, entry in enumerate(option_list) if entry.primary_text == Language.additional_settings()), len(option_list))
+        option_list.insert(display_at, GridOrListEntry(
+                        primary_text=Language.display_settings(),
+                        value_text=None,
+                        image_path=None,
+                        image_path_selected=None,
+                        description=None,
+                        icon=None,
+                        value=self.launch_display
+                    ))
+        return option_list
+"@
+        $add = ($add -replace "`r?`n", $nl).TrimEnd()
+        $basic = $basic.Replace($ret, $add)
+        [System.IO.File]::WriteAllText($basicPath, $basic)
+    }
+
+    if ($extra.Contains('# Only show display settings')) {
+        $pattern = '(?s)        # Only show display settings.*?(?=\s*option_list\.append\(\s*GridOrListEntry\(\s*primary_text=Language\.animation_settings\(\))'
+        $newExtra = [regex]::Replace($extra, $pattern, '', 1)
+        if ($newExtra -eq $extra) {
+            Write-Host 'Could not remove Display settings from Additional settings. Its layout was not recognised.'
+        } else {
+            [System.IO.File]::WriteAllText($extraPath, $newExtra)
+        }
+    }
+}
+
 function Enable-SaveAutoBackup([string]$Card) {
     $main = Join-Path $Card 'App\PyUI\main-ui\mainui.py'
     if (-not (Test-Path -LiteralPath $main)) { return }
@@ -338,6 +389,9 @@ if (@($selected | Where-Object { $_.id -eq 'saves' }).Count -gt 0) {
 }
 if (@($selected | Where-Object { $_.id -eq 'hotkeys' }).Count -gt 0) {
     Add-HotkeysMenu $card
+}
+if (@($selected | Where-Object { $_.id -eq 'display' }).Count -gt 0) {
+    Move-DisplaySettingsToRoot $card
 }
 Hide-BootMenuFromGames $card
 
