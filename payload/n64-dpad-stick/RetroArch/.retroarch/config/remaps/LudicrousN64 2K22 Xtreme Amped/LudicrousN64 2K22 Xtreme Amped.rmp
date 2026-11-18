@@ -1,8 +1,0 @@
-input_player1_l_x_minus_axis = "-0"
-input_player1_l_x_plus_axis = "+0"
-input_player1_l_y_minus_axis = "-1"
-input_player1_l_y_plus_axis = "+1"
-input_player1_l_x_minus_btn = "13"
-input_player1_l_x_plus_btn = "14"
-input_player1_l_y_minus_btn = "11"
-input_player1_l_y_plus_btn = "12"

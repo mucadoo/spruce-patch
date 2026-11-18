@@ -1,4 +1,5 @@
 {
+  "launch": "stick_launch.sh",
   "menuOptions": {
     "stickInput": {
       "display": "Stick",

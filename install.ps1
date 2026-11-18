@@ -293,22 +293,6 @@ primary_text="Hotkeys",
     [System.IO.File]::WriteAllText($menu, $text)
 }
 
-function Enable-N64StickMenu([string]$Card) {
-    $launchPath = Join-Path $Card 'spruce\scripts\emu\standard_launch.sh'
-    if (-not (Test-Path -LiteralPath $launchPath)) { return }
-    $text = [System.IO.File]::ReadAllText($launchPath)
-    if ($text.Contains('n64_stick_input.sh')) { return }
-    $nl = "`n"
-    if ($text.Contains("`r`n")) { $nl = "`r`n" }
-    $old = "load_n64_controller_profile${nl}			run_retroarch"
-    $new = "load_n64_controller_profile${nl}			[ -f /mnt/SDCARD/spruce/scripts/emu/lib/n64_stick_input.sh ] && . /mnt/SDCARD/spruce/scripts/emu/lib/n64_stick_input.sh && apply_n64_stick_input${nl}			run_retroarch"
-    if (-not $text.Contains($old)) {
-        Write-Host 'Could not add the N64 stick option to the launch script. Its layout was not recognised.'
-        return
-    }
-    [System.IO.File]::WriteAllText($launchPath, $text.Replace($old, $new))
-}
-
 function Move-DisplaySettingsToRoot([string]$Card) {
     $basicPath = Join-Path $Card 'App\PyUI\main-ui\menus\settings\basic_settings_menu.py'
     $extraPath = Join-Path $Card 'App\PyUI\main-ui\menus\settings\extra_settings_menu.py'
@@ -410,9 +394,6 @@ if (@($selected | Where-Object { $_.id -eq 'hotkeys' }).Count -gt 0) {
 }
 if (@($selected | Where-Object { $_.id -eq 'display' }).Count -gt 0) {
     Move-DisplaySettingsToRoot $card
-}
-if (@($selected | Where-Object { $_.id -eq 'n64-dpad-stick' }).Count -gt 0) {
-    Enable-N64StickMenu $card
 }
 Hide-BootMenuFromGames $card
 

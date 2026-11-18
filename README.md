@@ -48,7 +48,7 @@ On every N64 core (LudicrousN64, Mupen64Plus-Next, Mupen64Plus GLES2, ParaLLEl N
 - **Left stick and D-pad** is the default. Up, down, left, and right on the D-pad move the stick, and the left stick keeps doing it. The D-pad still works as a D-pad, so RetroArch's menu still responds to it.
 - **Left stick** takes the D-pad off the stick. The left stick is unchanged.
 
-The change applies the next time a game launches. Left or right on the row sets it for every N64 game. A on the row can set it for one game. Spruce copies its own controller layout onto some cores at launch, so this runs after that copy.
+The change applies the next time a game launches. Left or right on the row sets it for every N64 game. A on the row can set it for one game. The N64 launcher (`Emu/N64/stick_launch.sh`) writes the D-pad binds into each N64 core's RetroArch config, and it runs before spruce's own launch script. Spruce recopies its controller layout onto some cores at launch, so the binds are kept out of the remap files.
 
 **Save manager**
 
