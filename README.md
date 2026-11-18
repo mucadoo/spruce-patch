@@ -36,8 +36,8 @@ Stays on LudicrousN64, the fast core spruce already uses, so RetroAchievements s
 
 Two games cannot live with that:
 
-- **Paper Mario** uses the slower cached interpreter instead of the dynamic recompiler, because the opening freezes on the letter scene with the recompiler. It also copies the color buffer, and the core's own Paper Mario profile is ignored.
-- **Donkey Kong 64** does the same, and also copies the depth buffer. Without that the picture breaks up. Its stick deadzone is wider, so a resting stick does not swing the camera.
+- **Paper Mario** runs on Mupen64Plus-Next, not LudicrousN64. LudicrousN64 freezes at Luigi's door on this handheld's ARM CPU, and its slower modes stutter badly. Next runs it with the threaded renderer, the color buffer copy off, and the CPU overclock on for this game only. Its audio latency is 128 ms to smooth out the music. The installer adds one per-game entry to the N64 menu config to send Paper Mario there. The pause menu can open a moment late, and its background may look slightly wrong.
+- **Donkey Kong 64** stays on LudicrousN64. It turns the overclock off and copies the color buffer, and also copies the depth buffer. Without the depth copy the picture breaks up. Its stick deadzone is wider, so a resting stick does not swing the camera.
 
 Every other N64 game is unchanged.
 

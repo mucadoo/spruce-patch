@@ -123,6 +123,27 @@ function Merge-RetroarchCfg($sources) {
     return $tmp
 }
 
+# Emu\N64\config.json holds the whole N64 menu. The patch only adds the keys it
+# needs (per-game overrides), so merge those into the card's copy and keep the rest.
+function Merge-JsonOverrides([string]$CardFile, [string]$PatchFile) {
+    $target = [System.IO.File]::ReadAllText($CardFile) | ConvertFrom-Json
+    $patch  = [System.IO.File]::ReadAllText($PatchFile) | ConvertFrom-Json
+    function Merge-Node($into, $from) {
+        foreach ($prop in $from.PSObject.Properties) {
+            $existing = $into.PSObject.Properties[$prop.Name]
+            if ($existing -and $existing.Value -is [pscustomobject] -and $prop.Value -is [pscustomobject]) {
+                Merge-Node $existing.Value $prop.Value
+            } else {
+                $into | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $prop.Value -Force
+            }
+        }
+    }
+    Merge-Node $target $patch
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("spruce-json-" + [guid]::NewGuid().ToString() + ".json")
+    [System.IO.File]::WriteAllText($tmp, ($target | ConvertTo-Json -Depth 32))
+    return $tmp
+}
+
 $skip = @('spruce-config.json', 'proxy.sqlite3')
 $skipRel = @('App\RAOfflineProxy\data\config.json')
 $found = @()
@@ -152,6 +173,17 @@ foreach ($group in ($found | Group-Object Rel)) {
         $sources += @($items.Source)
         $files += [pscustomobject]@{
             Source  = Merge-RetroarchCfg $sources
+            Rel     = $items[0].Rel
+            Name    = $items[0].Name
+            Feature = ($items.Feature -join ' + ')
+        }
+    } elseif ($items[0].Rel -eq 'Emu\N64\config.json') {
+        if (-not (Test-Path -LiteralPath $cardTarget)) {
+            Write-Host "Skipped $($items[0].Rel): the card has no N64 menu config to merge into."
+            continue
+        }
+        $files += [pscustomobject]@{
+            Source  = Merge-JsonOverrides $cardTarget $items[0].Source
             Rel     = $items[0].Rel
             Name    = $items[0].Name
             Feature = ($items.Feature -join ' + ')

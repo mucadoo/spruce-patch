@@ -1,0 +1,14 @@
+{
+  "menuOptions": {
+    "Emulator_64": {
+      "overrides": {
+        "Paper Mario (USA).zip": "mupen64plus_next"
+      }
+    },
+    "Governor": {
+      "overrides": {
+        "Paper Mario (USA).zip": "Overclock"
+      }
+    }
+  }
+}
