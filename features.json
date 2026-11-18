@@ -15,6 +15,11 @@
     "description": "NES, SNES, and Genesis fill a 640x480 screen with sharp-shimmerless, so the pixels stay even. No frame. Covers every core those systems offer."
   },
   {
+    "id": "n64",
+    "name": "N64",
+    "description": "Keeps LudicrousN64 fast for RetroAchievements, and gives Paper Mario and Donkey Kong 64 the extra accuracy they need."
+  },
+  {
     "id": "saves",
     "name": "Save manager",
     "description": "An Apps menu entry that lists battery saves and savestates, deletes the ones you choose, and backs them up to Google Drive, including on a timer."

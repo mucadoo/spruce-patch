@@ -30,6 +30,17 @@ The frames and the shader are already on a spruceOS 4.6.0 card. This piece only 
 
 NES, SNES, and Genesis fill the screen (aspect Full), with bilinear off and sharp-shimmerless so a non-integer scale does not leave uneven pixels. No frame. That is his preferred setup for pixel-era consoles on a 640×480 handheld: the largest image, with the pixels balanced, and without a heavy CRT shader.
 
+**N64**
+
+Stays on LudicrousN64, the fast core spruce already uses, so RetroAchievements still runs. The whole library keeps framebuffer emulation off, high-level RSP, and a one-step CPU overclock. That is the speed setup.
+
+Two games cannot live with that:
+
+- **Paper Mario** turns the overclock off and copies the color buffer. The opening freezes on the letter when the CPU runs ahead of the picture, or when the game waits on a frame that was never copied back.
+- **Donkey Kong 64** does the same, and also copies the depth buffer. Without that the picture breaks up. Its stick deadzone is wider, so a resting stick does not swing the camera.
+
+Every other N64 game is unchanged.
+
 **Save manager**
 
 **Saves** is in the Apps menu. The home screen lists each console that has saves, with the theme's console icon, the number of games, and the time of the newest save. The console comes from the matching ROM, so Game Boy and Game Boy Color games are listed apart even though Gambatte saves both in one folder. Open a console to see its games with their box art, and open a game to see its battery save, its savestates with their pictures, and the time each was written. A file sitting outside a core folder is marked as a loose file.
