@@ -11,6 +11,7 @@ The patched spruce files stay under the [spruceOS license](https://creativecommo
 **RetroAchievements offline cache**
 
 - **Cache for offline** lets you pick a platform, a folder, or individual games. Games that are already cached are skipped. A game RetroAchievements does not know is marked **No achievements**. A known game whose dump has no set is marked **Unsupported version**. A file that cannot be read is marked **Could not read**. Those are not offered as still to cache.
+- **Cache when launched** is on unless you turn it off. Launching a game caches it when it is not cached yet, including its icon and badges. A game that is already cached is left alone. Left or right changes it.
 - **Keep library offline** watches the whole library, or only the platforms you choose. When you turn it on, you can cache the games already in that folder, or only games you add later. [How the watch works](docs/keep-library-offline.md).
 - **Cached Games** shows each game's own icon.
 - **RetroAchievements** sits on the main settings list, under that name.

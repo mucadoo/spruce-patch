@@ -3,7 +3,9 @@ from __future__ import annotations
 import enum
 import json
 import logging
+import os
 import tempfile
+import threading
 import time
 import urllib.error
 import zipfile
@@ -15,7 +17,14 @@ from urllib.parse import urljoin
 from . import cache_budget, cache_keys, cache_queue, rate_limit, usage_stats
 from .auth import resolve_credentials
 from .cache_queue import QueuedRom
-from .config import FALLBACK_USER_AGENT, RA_MEDIA_HOST, image_caching_enabled, upstream_host
+from .config import (
+    FALLBACK_USER_AGENT,
+    RA_MEDIA_HOST,
+    image_caching_enabled,
+    load_config,
+    save_config,
+    upstream_host,
+)
 from .es_export import collect_cached_game_ids
 from .image_cache import (
     clear_all_cached_images,
@@ -27,6 +36,7 @@ from .image_cache import (
     images_downloaded_inline,
     resolve_cached_static_asset,
     schedule_image_download,
+    title_icon_path,
 )
 from .network import RequestAborted, abort_requested, build_api_url, http_get, interactive_cache
 from .rom_cache import (
@@ -256,6 +266,132 @@ def game_record_complete_any(storage: Storage, game_id: int) -> bool:
         if game_record_complete(storage, game_id, user):
             return True
     return False
+
+
+_CACHE_ON_LAUNCH = "cache_on_launch"
+_launch_cache_games: set[int] = set()
+_launch_cache_lock = threading.Lock()
+
+
+def cache_on_launch_enabled() -> bool:
+    """Missing means on, which is how launching a game already filled the cache."""
+    configured = load_config().get(_CACHE_ON_LAUNCH)
+    if configured is None:
+        return True
+    return bool(configured)
+
+
+def set_cache_on_launch(enabled: bool) -> None:
+    data = load_config()
+    data[_CACHE_ON_LAUNCH] = bool(enabled)
+    save_config(data)
+
+
+def launch_already_cached(storage: Storage, game_id: int, user: str) -> bool:
+    """A manual cache has a patch. A game cached from online play has its set, unlocks and session."""
+    if game_record_complete(storage, game_id, user):
+        return True
+    if storage.get_cache(cache_keys.unlocks(game_id, user)) is None:
+        return False
+    if storage.get_cache(cache_keys.start_session(game_id, user)) is None:
+        return False
+    for meta in storage.cached_game_meta(game_id):
+        key = str(meta.get("cacheKey") or "")
+        if key.startswith((cache_keys.PREFIX_PATCH, cache_keys.PREFIX_ACHIEVEMENTSETS)):
+            return True
+    return False
+
+
+def _hash_for_launched_game(storage: Storage, game_id: int, user: str) -> str | None:
+    owner = cache_keys.normalize_user(user)
+    prefix = cache_keys.PREFIX_ACHIEVEMENTSETS
+    for meta in storage.cached_game_meta(game_id):
+        key = str(meta.get("cacheKey") or "")
+        if not key.startswith(prefix):
+            continue
+        hash_value, separator, key_user = key[len(prefix):].rpartition(":")
+        if separator and key_user == owner and hash_value and not hash_value.isdigit():
+            return hash_value
+    for entry in storage.iter_cache_by_prefix(cache_keys.PREFIX_GAMEID):
+        if game_id_from_response(str(entry.get("responseBody") or "")) != game_id:
+            continue
+        hash_value = str(entry.get("cacheKey") or "")[len(cache_keys.PREFIX_GAMEID):]
+        if hash_value and not hash_value.isdigit():
+            return hash_value
+    return None
+
+
+def maybe_cache_launched_game(
+    storage: Storage,
+    config_data: dict,
+    game_id: int,
+    user: str,
+    token: str,
+    user_agent: str,
+    hash_value: str | None = None,
+) -> None:
+    """Cache a game that was just launched, unless the option is off or the game is already cached."""
+    if not cache_on_launch_enabled() or game_id <= 0 or not user or not token:
+        return
+    if launch_already_cached(storage, game_id, user):
+        return
+    resolved = (hash_value or "").strip() or _hash_for_launched_game(storage, game_id, user)
+    if not resolved or resolved.isdigit():
+        return
+    with _launch_cache_lock:
+        if game_id in _launch_cache_games:
+            return
+        _launch_cache_games.add(game_id)
+    threading.Thread(
+        target=_cache_launched_game,
+        args=(storage, config_data, game_id, resolved, user, token, user_agent or ""),
+        daemon=True,
+    ).start()
+
+
+def _cache_launched_game(
+    storage: Storage,
+    config_data: dict,
+    game_id: int,
+    hash_value: str,
+    user: str,
+    token: str,
+    user_agent: str,
+) -> None:
+    try:
+        _lower_launch_cache_priority()
+        LOGGER.info("Caching game %s on launch", game_id)
+        credentials = {"user": user, "token": token}
+        cache_game(
+            game_id,
+            hash_value,
+            credentials,
+            user_agent,
+            storage,
+            config_data,
+            cache_images=image_caching_enabled(config_data),
+        )
+        patch_entry = storage.get_cache(cache_keys.patch(game_id, user))
+        if patch_entry is None:
+            return
+        ua = proxy_user_agent(user_agent)
+        cache_game_icon(game_id, patch_entry["responseBody"], ua)
+        cache_game_badges(game_id, patch_entry["responseBody"], ua)
+    except Exception as exc:
+        LOGGER.warning("Launch cache failed for game %s: %s", game_id, exc)
+    finally:
+        with _launch_cache_lock:
+            _launch_cache_games.discard(game_id)
+
+
+def _lower_launch_cache_priority() -> None:
+    """A launch cache shares the handheld with the game that just started."""
+    if os.name != "posix":
+        return
+    try:
+        os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), 19)
+    except (AttributeError, OSError):
+        return
 
 
 def resume_interrupted_cache(storage: Storage) -> int:
@@ -1181,20 +1317,8 @@ def cache_game_badges(game_id: int, patch_body: str, user_agent: str) -> None:
     if interactive_cache():
         return
     started = time.monotonic()
-    try:
-        patch_data = json.loads(patch_body).get("PatchData") or {}
-    except Exception:
-        return
-    achievements = patch_data.get("Achievements")
-    if not isinstance(achievements, list):
-        return
-    for achievement in achievements:
-        if not isinstance(achievement, dict):
-            continue
-        for key in ("BadgeURL", "BadgeLockedURL"):
-            url = achievement.get(key)
-            if not isinstance(url, str) or not url.strip():
-                continue
+    for achievement in _achievement_dicts(patch_body):
+        for url in _badge_urls(achievement):
             if abort_requested() or time.monotonic() - started > 45:
                 return
             image_path = extract_image_path(url)
@@ -1203,30 +1327,98 @@ def cache_game_badges(game_id: int, patch_body: str, user_agent: str) -> None:
             download_static_image(url, image_path, user_agent)
 
 
+def _achievement_dicts(body: str) -> list[dict]:
+    """Achievements from a patch or from an achievementsets response.
+
+    Online play stores the set response. A manual cache stores the patch. Both carry the badges.
+    """
+    try:
+        data = json.loads(body)
+    except Exception:
+        return []
+    if not isinstance(data, dict):
+        return []
+    found: list[dict] = []
+    patch_data = data.get("PatchData")
+    if isinstance(patch_data, dict):
+        found.extend(_dicts(patch_data.get("Achievements")))
+    found.extend(_dicts(data.get("Achievements")))
+    sets = data.get("Sets")
+    if isinstance(sets, list):
+        for item in sets:
+            if isinstance(item, dict):
+                found.extend(_dicts(item.get("Achievements")))
+    return found
+
+
+def _dicts(achievements) -> list[dict]:
+    if isinstance(achievements, list):
+        return [item for item in achievements if isinstance(item, dict)]
+    if isinstance(achievements, dict):
+        return [item for item in achievements.values() if isinstance(item, dict)]
+    return []
+
+
+def _badge_urls(achievement: dict) -> list[str]:
+    urls = []
+    for key in ("BadgeURL", "BadgeLockedURL"):
+        url = achievement.get(key)
+        if isinstance(url, str) and url.strip():
+            urls.append(url)
+    if urls:
+        return urls
+    name = achievement.get("BadgeName")
+    if not isinstance(name, str):
+        return []
+    name = name.strip()
+    if not name or "/" in name or "\\" in name or ".." in name:
+        return []
+    if name.lower().endswith(".png"):
+        name = name[:-4]
+    if not name:
+        return []
+    return [f"{RA_MEDIA_HOST}/Badge/{name}.png", f"{RA_MEDIA_HOST}/Badge/{name}_lock.png"]
+
+
 def ensure_cached_game_icon(
     storage: Storage, game_id: int, user: str, user_agent: str, *, badges: bool = True
 ) -> None:
-    """Downloads the title icon, and the badges unless a bulk scan asked to skip them."""
-    patch_entry = storage.get_cache(cache_keys.patch(game_id, user))
-    if patch_entry is None:
+    """Downloads the title icon, and the badges unless a bulk scan asked to skip them.
+
+    A game cached by playing online has an achievementsets body instead of a patch.
+    """
+    bodies = _image_source_bodies(storage, game_id, user)
+    if not bodies:
         return
     ua = proxy_user_agent(user_agent)
-    cache_game_icon(game_id, patch_entry["responseBody"], ua)
-    if badges:
-        cache_game_badges(game_id, patch_entry["responseBody"], ua)
+    for body in bodies:
+        cache_game_icon(game_id, body, ua)
+        if badges:
+            cache_game_badges(game_id, body, ua)
+
+
+def _image_source_bodies(storage: Storage, game_id: int, user: str) -> list[str]:
+    patch_entry = storage.get_cache(cache_keys.patch(game_id, user))
+    if patch_entry is not None:
+        return [patch_entry["responseBody"]]
+    for meta in storage.cached_game_meta(game_id):
+        key = str(meta.get("cacheKey") or "")
+        if not key.startswith(cache_keys.PREFIX_ACHIEVEMENTSETS):
+            continue
+        entry = storage.get_cache(key)
+        if entry is None:
+            continue
+        return [entry["responseBody"]]
+    return []
 
 
 def cache_game_icon(game_id: int, patch_body: str, user_agent: str) -> None:
     """Saves the title icon shown when the game launches, and the static copy RetroArch fetches.
 
-    PatchData.ImageIcon is a site-relative /Images/ path. Achievement badges are queued with
-    the rest of the game's images. Skips the download once both copies are already on disk.
+    PatchData.ImageIcon is a site-relative /Images/ path. An achievementsets response uses
+    ImageIconUrl instead. Skips the download once both copies are already on disk.
     """
-    try:
-        patch_data = json.loads(patch_body).get("PatchData") or {}
-    except Exception:
-        return
-    image_path = extract_image_path(patch_data.get("ImageIcon") or "")
+    image_path = title_icon_path("patch", patch_body) or title_icon_path("achievementsets", patch_body)
     if image_path is None:
         return
     icon_file = game_image_dir(game_id) / "icon.png"

@@ -77,6 +77,8 @@ from .rom_browser import (
     describe_browser_entries,
     describe_browser_entries_fast,
     list_cached_games,
+    cache_on_launch_enabled,
+    set_cache_on_launch,
     load_cached_rom_paths,
     load_no_match_rom_paths,
     list_scannable_files_recursive,
@@ -104,7 +106,7 @@ from .watch_folders import (
     watch_folder,
     watched_folders,
 )
-from .image_cache import game_image_dir
+from .image_cache import materialize_game_icon
 from .state import load_online_state, load_patch_state, save_patch_state, save_online_state
 from .ui import write_status_image, write_text_image
 from .update import (
@@ -299,6 +301,9 @@ def main() -> None:
             "enable-usage-stats",
             "disable-usage-stats",
             "usage-stats-status",
+            "enable-cache-on-launch",
+            "disable-cache-on-launch",
+            "cache-on-launch-status",
             "cached-games",
             "cached-games-count",
             "cached-unlock-titles",
@@ -537,6 +542,20 @@ def main() -> None:
             print("Usage stats disabled")
             return
 
+        if args.command == "enable-cache-on-launch":
+            set_cache_on_launch(True)
+            print("enabled")
+            return
+
+        if args.command == "disable-cache-on-launch":
+            set_cache_on_launch(False)
+            print("disabled")
+            return
+
+        if args.command == "cache-on-launch-status":
+            print("enabled" if cache_on_launch_enabled() else "disabled")
+            return
+
         if args.command == "usage-stats-status":
             status = usage_stats.consent_status(config_data)
             if args.as_json:
@@ -560,7 +579,7 @@ def main() -> None:
                                 "title": game.title,
                                 "unlocks": unlock_counts.get(game.game_id),
                                 "rom_path": rom_paths.get(game.game_id),
-                                "icon": str(icon) if (icon := game_image_dir(game.game_id) / "icon.png").is_file() else None,
+                                "icon": str(icon) if (icon := materialize_game_icon(game.game_id, game.image_url)) is not None else None,
                             }
                             for game in games
                         ],

@@ -456,8 +456,60 @@ def resolve_cached_static_asset(path: str) -> Path | None:
     return None
 
 
+def title_icon_path(action: str | None, body: str) -> str | None:
+    """The game's own icon. A subset in the same response has its own ImageIconUrl, and that
+    must not replace the title shown in Cached Games."""
+    try:
+        data = json.loads(body)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    if action == "patch":
+        patch_data = data.get("PatchData")
+        if not isinstance(patch_data, dict):
+            return None
+        source = patch_data.get("ImageIconUrl") or patch_data.get("ImageIcon")
+    elif action == "achievementsets":
+        source = data.get("ImageIconUrl") or data.get("ImageIcon")
+    else:
+        return None
+    if not isinstance(source, str):
+        return None
+    return extract_image_path(source)
+
+
+def materialize_game_icon(game_id: int, image_url: str | None) -> Path | None:
+    """Icon file the cached-games menu shows.
+
+    A manual cache writes games/<id>/icon.png. Playing online downloads the same art into the
+    shared image cache, because the achievementsets request names the game in its body rather
+    than as a request parameter, and leaves the menu file missing.
+    """
+    icon_file = game_image_dir(game_id) / "icon.png"
+    if icon_file.is_file():
+        return icon_file
+    image_path = extract_image_path(image_url or "")
+    if image_path is None or not image_path.lower().startswith("/images/"):
+        return None
+    asset = resolve_cached_static_asset(image_path)
+    if asset is None:
+        return None
+    try:
+        icon_file.parent.mkdir(parents=True, exist_ok=True)
+        temporary = icon_file.with_suffix(".png.tmp")
+        temporary.write_bytes(asset.read_bytes())
+        temporary.replace(icon_file)
+    except OSError:
+        return asset
+    return icon_file if icon_file.is_file() else asset
+
+
 def resolve_cached_game_icon_path(game_id: int) -> Path | None:
     """Returns the cached game icon file for game_id, used by the UI game-list."""
+    icon_file = game_image_dir(game_id) / "icon.png"
+    if icon_file.is_file():
+        return icon_file
     directory = game_image_dir(game_id)
     if not directory.exists():
         return None

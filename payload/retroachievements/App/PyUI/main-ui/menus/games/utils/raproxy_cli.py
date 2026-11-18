@@ -8,6 +8,18 @@ from utils.logger import PyUiLogger
 from utils.py_ui_config import PyUiConfig
 
 
+def cache_on_launch_enabled():
+    out = run("cache-on-launch-status", timeout=15)
+    if not out:
+        return True
+    return out.strip().splitlines()[-1] == "enabled"
+
+
+def set_cache_on_launch(enabled):
+    command = "enable-cache-on-launch" if enabled else "disable-cache-on-launch"
+    return run(command, timeout=15) is not None
+
+
 def enabled():
     return (PyUiConfig.get_raproxy_cli_cmd() is not None
             and "True" == CfwSystemConfig.get_selected_value(

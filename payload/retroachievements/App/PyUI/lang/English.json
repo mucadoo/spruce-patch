@@ -642,6 +642,8 @@
     "cachingCheevos": "Caching achievements...",
     "keepSystemOffline": "Keep system offline",
     "keepSystemOfflineState": "Keep offline: {state}",
+    "cacheOnLaunch": "Cache when launched",
+    "cacheOnLaunchDesc": "A game you launch is cached if it is not cached yet",
     "keepLibraryOffline": "Keep library offline",
     "keepLibraryOfflineDesc": "Watch the whole library, or only the platforms you choose",
     "cheevosWatchWholeLibrary": "Games you add later are cached. You can also cache the games already here.",

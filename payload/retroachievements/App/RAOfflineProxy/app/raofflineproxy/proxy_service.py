@@ -33,6 +33,7 @@ from .image_cache import (
     resolve_cached_static_asset,
     rewrite_image_urls,
     schedule_image_download,
+    title_icon_path,
 )
 from .network import (
     build_forward_headers,
@@ -56,7 +57,13 @@ from .rom_cache import (
     refresh_game_patch,
 )
 from .last_played import LAST_PLAYED_ACTIONS, load_recently_played_game_ids, record_game_played
-from .rom_browser import DrainResult, DrainStop, drain_cache_queue, format_clock_time
+from .rom_browser import (
+    DrainResult,
+    DrainStop,
+    drain_cache_queue,
+    format_clock_time,
+    maybe_cache_launched_game,
+)
 from .state import save_online_state
 from .storage import Storage, current_millis, migrate_user_case_in_cache_keys
 from .utils import (
@@ -198,14 +205,40 @@ def game_id_cache_miss() -> bytes:
     )
 
 
+def _response_game_id(action: str | None, body: str) -> int | None:
+    """Achievement sets name the game in the body. The request only carries the ROM hash."""
+    if action != "achievementsets":
+        return None
+    try:
+        game_id = json.loads(body).get("GameId")
+    except Exception:
+        return None
+    if isinstance(game_id, int) and game_id > 0:
+        return game_id
+    return None
+
+
+def _icon_game_id(image_path: str, game_id: int | None, icon_path: str | None) -> int | None:
+    """Only the title icon is copied to games/<id>/icon.png. Other /Images/ files in the same
+    response belong to a subset and would replace the menu icon if they were copied too."""
+    if game_id is None or not image_path.lower().startswith("/images/"):
+        return None
+    if not icon_path:
+        return game_id
+    if image_path.split("?", 1)[0] == icon_path.split("?", 1)[0]:
+        return game_id
+    return None
+
+
 def _start_image_downloads(
     downloads: list[tuple[str, str]],
     user_agent: str | None,
     game_id: int | None,
+    icon_path: str | None = None,
 ) -> None:
     ua = user_agent or FALLBACK_USER_AGENT
     for orig_url, img_path in downloads:
-        schedule_image_download(orig_url, img_path, ua, game_id)
+        schedule_image_download(orig_url, img_path, ua, _icon_game_id(img_path, game_id, icon_path))
 
 
 class ThreadingTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
@@ -558,11 +591,17 @@ class ProxyRuntimeServer(ThreadingTCPServer):
 
         if should_cache_response(response_body) and should_cache_action(action, path):
             proxy_base_url = self._proxy_base_url()
-            game_id_str = extract_request_param(path, raw_body, "g")
+            game_id_str = extract_request_param(path, raw_body, "g") or extract_request_param(
+                path, raw_body, "i"
+            )
             game_id_int = int(game_id_str) if game_id_str and game_id_str.isdigit() else None
+            if game_id_int is None:
+                game_id_int = _response_game_id(action, response_body)
             rewritten_body, downloads = rewrite_image_urls(action, response_body, proxy_base_url)
             if image_caching_enabled(self.config_data):
-                _start_image_downloads(downloads, user_agent, game_id_int)
+                _start_image_downloads(
+                    downloads, user_agent, game_id_int, title_icon_path(action, response_body)
+                )
             key = cache_key_for_request(path, raw_body)
 
             self.storage.upsert_cache(key, response_body)
@@ -578,7 +617,37 @@ class ProxyRuntimeServer(ThreadingTCPServer):
                         self.storage,
                     )
             response_body = rewritten_body
+        if should_cache_response(response_body):
+            self._cache_game_on_launch(path, raw_body, action, response_body, user_agent)
         return response_bytes(status_code, response_body, reason)
+
+    def _cache_game_on_launch(
+        self,
+        path: str,
+        raw_body: str,
+        action: str | None,
+        response_body: str,
+        user_agent: str,
+    ) -> None:
+        if action not in {"achievementsets", "patch", "startsession"}:
+            return
+        game_id_str = extract_request_param(path, raw_body, "g") or extract_request_param(
+            path, raw_body, "i"
+        )
+        game_id = int(game_id_str) if game_id_str and game_id_str.isdigit() else None
+        if game_id is None:
+            game_id = _response_game_id(action, response_body)
+        if game_id is None:
+            return
+        maybe_cache_launched_game(
+            self.storage,
+            self.config_data,
+            game_id,
+            extract_request_param(path, raw_body, "u") or "",
+            extract_request_param(path, raw_body, "t") or "",
+            user_agent,
+            extract_request_param(path, raw_body, "m") if action == "achievementsets" else None,
+        )
 
     def refresh_unlocks_from_start_session(
         self, game_id: int, user: str, response_body: str

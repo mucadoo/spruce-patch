@@ -41,6 +41,15 @@ class CfwSystemSettingsMenuForCategory(settings_menu.SettingsMenu):
             return
         show_background_cache()
 
+    def _cache_on_launch(self):
+        if not hasattr(self, "_cache_on_launch_value"):
+            self._cache_on_launch_value = raproxy_cli.cache_on_launch_enabled()
+        return self._cache_on_launch_value
+
+    def _set_cache_on_launch(self, enabled):
+        if raproxy_cli.set_cache_on_launch(bool(enabled)):
+            self._cache_on_launch_value = bool(enabled)
+
     def watch_new_games(self, input_value):
         if ControllerInput.A != input_value:
             return
@@ -101,6 +110,18 @@ class CfwSystemSettingsMenuForCategory(settings_menu.SettingsMenu):
                 description=Language.label(
                     "cheevosBackgroundDesc",
                     "See games still caching, or stop them")))
+            option_list.append(GridOrListEntry(
+                primary_text=Language.label("cacheOnLaunch", "Cache when launched"),
+                value_text="<    " + Language.boolean_label(self._cache_on_launch()) + "    >",
+                image_path=None,
+                image_path_selected=None,
+                description=Language.label(
+                    "cacheOnLaunchDesc",
+                    "A game you launch is cached if it is not cached yet"),
+                icon=None,
+                value=lambda input_value: self.change_enabled_disabled(
+                    input_value, self._cache_on_launch, self._set_cache_on_launch),
+            ))
             option_list.append(self.cheevos_entry(
                 Language.label("keepLibraryOffline", "Keep library offline"), self.watch_new_games,
                 description=Language.label(
