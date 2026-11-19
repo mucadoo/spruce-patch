@@ -406,6 +406,13 @@ class ProxyRuntimeServer(ThreadingTCPServer):
             return ok_json('{"Success":true}')
 
         if action in ALWAYS_TRY_UPSTREAM_ACTIONS:
+            # Offline, RetroArch gives up before a DNS failure returns. A cached
+            # login has to go out immediately; the network is only tried when
+            # there is no saved login, or when the device is online.
+            if not self.is_online():
+                cached_login_response = self.handle_offline_login(path, raw_body, action)
+                if cached_login_response is not None:
+                    return cached_login_response
             upstream = self.forward_to_upstream_result(method, path, raw_body, headers)
             if upstream[0] in {"success", "http_error"}:
                 status_code = upstream[1]
