@@ -322,13 +322,18 @@ def _head_upstream(url: str, user_agent: str | None) -> tuple[bool, str]:
         },
         method="HEAD",
     )
-    try:
+    def open_upstream() -> int:
         with urllib.request.urlopen(
             request, timeout=5, context=configured_ssl_context()
         ) as response:
-            if 200 <= response.status < 500:
-                return True, ""
-            return False, f"HTTP {response.status}"
+            return response.status
+
+    try:
+        # DNS here can ignore the socket timeout, so bound the whole call.
+        status = run_bounded(open_upstream, timeout=8.0)
+        if 200 <= status < 500:
+            return True, ""
+        return False, f"HTTP {status}"
     except Exception as error:
         return False, str(error)
 

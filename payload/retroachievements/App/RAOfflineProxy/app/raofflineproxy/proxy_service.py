@@ -329,7 +329,9 @@ class ProxyRuntimeServer(ThreadingTCPServer):
         return f"http://{proxy_host(cfg)}:{proxy_port(cfg)}"
 
     def is_online(self) -> bool:
-        self.refresh_reachability(force_probe=False)
+        # Cached state only. The connectivity monitor probes in the background, and
+        # probing here stalls the emulator's request for as long as DNS hangs, which
+        # this device's DNS can do for minutes.
         return self.has_internet and is_retroachievements_reachable()
 
     def refresh_reachability(self, force_probe: bool) -> bool:
