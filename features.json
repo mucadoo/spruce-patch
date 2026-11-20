@@ -38,5 +38,10 @@
     "id": "display",
     "name": "Display presets",
     "description": "Moves Display settings to the top Settings menu, and adds Default and Dimmest presets. Default restores the stock picture. Dimmest uses the lowest lit backlight, brightness 8, and contrast 2."
+  },
+  {
+    "id": "ereader",
+    "name": "E-Reader",
+    "description": "Replaces the stock E-Reader with word lookup, highlights, and book typography, and adds an offline English dictionary."
   }
 ]

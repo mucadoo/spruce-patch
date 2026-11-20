@@ -69,6 +69,16 @@ Nintendo DS and DSi stay off the games menu when the only file in the folder is 
 - **Default** puts the picture back to the stock Flip values: backlight 10, brightness 7, contrast 10, saturation 14, hue 10.
 - **Dimmest** sets the backlight to its lowest step that still lights the panel, brightness to 8, and contrast to 2. Saturation and hue stay where they are. The lamp cannot go lower than that step without switching off.
 
+**E-Reader**
+
+Replaces the stock E-Reader and adds an offline English dictionary (WordNet 3.1). Books stay in `Roms/EBOOKS`. Highlights and the reading position stay in the reader's store and are not touched by a later install.
+
+- **Y** selects a word. The D-pad moves the cursor, and holding it repeats. **A** opens **Look up** or **Highlight** (or **Remove highlight**). **B** or **Y** leaves selection.
+- The book's own type sizes are used. The title and chapter titles are larger than the body, italics and bold are kept, quotes are indented, and preformatted text uses a monospace font. Jpeg, png, and gif pictures are shown.
+- **Select** opens the chapter list. **X** opens settings (theme, font, size, shoulder buttons, progress). **A** shows or hides the progress line. **Menu** quits.
+
+The full guide, including every button, what is saved, and what the dictionary can and cannot look up, is in [spruce-ereader](https://github.com/mucadoo/spruce-ereader). The reader is GPL. The dictionary notice ships with the dictionary.
+
 **Hotkey list**
 
 **Hotkeys** is a row in Settings, above About. It lists the chords spruce is using on this device: brightness, screenshot, volume, sleep, and shut down, then what a tap and a hold of Menu do, then the RetroArch chords. The RetroArch ones use whichever button you picked for the hotkey (Select, Start, or Menu). If that setting is Custom, they are shown as Hotkey plus the other button. Changing a chord in Button Settings and opening Hotkeys again shows the new one. Nothing on this screen changes a setting.
@@ -82,7 +92,7 @@ You need Windows, a spruceOS **4.6.0** card, and the card's volume name set to *
 3. Double-click `install.bat`.
 4. Type the numbers of the pieces you want, or `A` for all of them.
 5. Read the file list and type `y` to confirm.
-6. Eject the card, put it back in the handheld, and reboot if you installed the RetroAchievements piece. The picture pieces apply the next time a game starts.
+6. Eject the card, put it back in the handheld, and reboot if you installed the RetroAchievements piece. The picture pieces apply the next time a game starts. The E-Reader is ready the next time you open it.
 
 The installer copies each current file to a backup folder in your user profile (`spruce-patch-backup-<date>`) before it overwrites anything. To undo, copy those files back onto the card in the same folders.
 

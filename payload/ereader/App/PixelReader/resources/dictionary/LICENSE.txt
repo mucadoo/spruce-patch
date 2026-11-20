@@ -1,0 +1,9 @@
+WordNet 3.1 definitions, Copyright 2011 Princeton University.
+Permission to use, copy, modify and distribute this database for any purpose
+and without fee or royalty is granted, provided this notice and the following
+disclaimer appear on all copies.
+
+THIS DATABASE IS PROVIDED "AS IS" AND PRINCETON UNIVERSITY MAKES NO
+REPRESENTATIONS OR WARRANTIES, EXPRESS OR IMPLIED, INCLUDING MERCHANTABILITY
+OR FITNESS FOR A PARTICULAR PURPOSE. The name of Princeton University may not
+be used in advertising or publicity pertaining to distribution of the database.
