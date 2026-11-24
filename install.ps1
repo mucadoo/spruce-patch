@@ -9,7 +9,9 @@ function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 
 $catalogPath = Join-Path $here 'features.json'
 if (-not (Test-Path -LiteralPath $catalogPath)) { throw 'features.json is missing. Re-download the patch.' }
-$catalog = @(Get-Content -LiteralPath $catalogPath -Raw | ConvertFrom-Json)
+# Windows PowerShell 5.1 emits a JSON array as one object when it is piped, so
+# parse it as an argument to keep one entry per feature.
+$catalog = [object[]](ConvertFrom-Json (Get-Content -LiteralPath $catalogPath -Raw))
 if ($catalog.Count -eq 0) { throw 'features.json has no install options.' }
 
 Write-Host ''
