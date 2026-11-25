@@ -42,6 +42,6 @@
   {
     "id": "ereader",
     "name": "E-Reader",
-    "description": "Replaces the stock E-Reader with word lookup, highlights, bookmarks, footnotes, book typography, and a bar for time left, and adds offline English, French, and Portuguese dictionaries."
+    "description": "Replaces the stock E-Reader with word lookup, search, highlights, bookmarks, footnotes, favorites, reading stats, hyphenation, book typography, and a bar for time left, and adds offline English, French, and Portuguese dictionaries."
   }
 ]
