@@ -75,9 +75,10 @@ Replaces the stock E-Reader and adds offline English (WordNet 3.1), French, and 
 
 - **Y** selects a word. The D-pad moves the cursor, and holding it repeats. **A** opens **Look up**, **Search book**, **Highlight**, **Underline**, **Strike out** (or **Remove highlight**). **B** or **Y** leaves selection. Every word you look up goes to a word list.
 - The book's own type sizes are used. The title and chapter titles are larger than the body, italics and bold are kept, quotes are indented, and preformatted text uses a monospace font. Jpeg, png, and gif pictures are shown.
-- **Select** opens the book menu: chapters, bookmarks, go to a percent, go to a page (Page mode), jump back, reading stats, the word list, highlights, and export of highlights and words to a text file. On a footnote link, **A** also offers **Show note**.
-- **X** opens settings (theme, font, size, shoulder buttons, progress, a three-place bar with time left, clock and battery, margins, line spacing, justify, hyphenation, auto exit; layout is remembered for each book). **A** shows or hides the progress line. **Menu** quits.
-- The book list shows the title and author from each epub, how far you got, and **Continue** for the book you read last. **Start** changes the order (name, title, author, recent). **Y** opens options: properties, favorites, mark finished, hide finished books.
+- **Select** opens the book menu: chapters, bookmarks, next and previous mark, book map, go to a percent, go to a page (Page mode), view pictures (full screen with zoom), jump back, reading stats, the word list, highlights, and export of highlights and words to a text file. On a footnote link, **A** also offers **Show note**.
+- **X** opens settings (theme, font, size, shoulder buttons, progress, a three-place bar with time left, clock and battery, margins, line spacing, justify, indent, paragraph gap, bold text, hyphenation, automatic night theme, auto exit; layout is remembered for each book). **A** shows or hides the progress line. **Menu** quits.
+- The book list shows the title and author from each book, how far you got, and **Continue** for the book you read last. **Start** changes the order (name, title, author, series, recent). **Y** opens options: properties, favorites, mark finished, hide finished books, library search with an on-screen keyboard, rename and delete.
+- Opens epub, FB2, HTML, Markdown and text files (UTF-8, UTF-16 and Latin-1).
 
 The full guide, including every button, what is saved, and what the dictionary can and cannot look up, is in [spruce-ereader](https://github.com/mucadoo/spruce-ereader). The reader is GPL. The dictionary and hyphenation notices ship with their files.
 
