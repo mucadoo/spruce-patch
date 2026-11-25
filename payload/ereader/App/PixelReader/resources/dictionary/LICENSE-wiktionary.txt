@@ -1,0 +1,11 @@
+French and Portuguese dictionaries (french.txt, portuguese.txt)
+
+These files are derived from the English Wiktionary (https://en.wiktionary.org),
+as extracted by wiktextract and published by Kaikki (https://kaikki.org).
+For each word they keep a short English gloss for up to three readings.
+
+Wiktionary text is available under the Creative Commons Attribution-ShareAlike
+4.0 License (https://creativecommons.org/licenses/by-sa/4.0/) and the GNU Free
+Documentation License. The contributors are listed in the page histories on
+Wiktionary. These files were shortened and reformatted, and are shared under the
+same CC BY-SA 4.0 terms.
