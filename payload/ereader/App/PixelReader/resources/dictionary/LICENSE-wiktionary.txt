@@ -1,4 +1,4 @@
-French and Portuguese dictionaries (french.txt, portuguese.txt)
+French, Portuguese, Spanish, Italian, German and Russian dictionaries (french.txt, portuguese.txt, spanish.txt, italian.txt, german.txt, russian.txt)
 
 These files are derived from the English Wiktionary (https://en.wiktionary.org),
 as extracted by wiktextract and published by Kaikki (https://kaikki.org).

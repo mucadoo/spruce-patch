@@ -71,7 +71,7 @@ Nintendo DS and DSi stay off the games menu when the only file in the folder is 
 
 **E-Reader**
 
-Replaces the stock E-Reader and adds offline English (WordNet 3.1), French, and Portuguese (Wiktionary) dictionaries, picked by the language of each book. Books stay in `Roms/EBOOKS`. Highlights and the reading position stay in the reader's store and are not touched by a later install.
+Replaces the stock E-Reader and adds offline English (WordNet 3.1), French, Portuguese, Spanish, Italian, German, and Russian (Wiktionary) dictionaries, picked by the language of each book. Books stay in `Roms/EBOOKS`. Highlights and the reading position stay in the reader's store and are not touched by a later install.
 
 - **Y** selects a word. The D-pad moves the cursor, and holding it repeats. **A** opens **Look up** (with near matches when a word has no entry), **Search book**, **Highlight**, **Underline**, **Strike out** (or **Remove highlight**). **B** or **Y** leaves selection. Every word you look up goes to a word list.
 - The book's own type sizes are used. The title and chapter titles are larger than the body, italics and bold are kept, quotes are indented, and preformatted text uses a monospace font. Jpeg, png, and gif pictures are shown.
